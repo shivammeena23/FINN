@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import type { Announcement, AlertConfig, Bar, Category } from "@/lib/types";
+import type { Announcement, AlertConfig, Category } from "@/lib/types";
 import { DEFAULT_ALERT_CONFIG } from "@/lib/types";
 import { evaluateSignals, type SignalInput } from "@/lib/signals";
 import { CATEGORY_LABEL } from "@/lib/categories";
@@ -14,6 +14,45 @@ const WATCHABLE: Category[] = [
 ];
 
 const KEY = "finn.alerts.v1";
+
+/* --- persisted threshold store ------------------------------------------- */
+
+/** localStorage is not reactive across tabs on its own; "storage" fires for other tabs. */
+function subscribe(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+let cached: { raw: string | null; value: AlertConfig } = { raw: null, value: DEFAULT_ALERT_CONFIG };
+
+/**
+ * useSyncExternalStore compares snapshots by identity, so parsing on every call would
+ * loop forever. Cache the parse and only redo it when the raw string actually changes.
+ */
+function readStored(): AlertConfig {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(KEY);
+  } catch {
+    return DEFAULT_ALERT_CONFIG;
+  }
+  if (raw === cached.raw) return cached.value;
+  let value = DEFAULT_ALERT_CONFIG;
+  if (raw) {
+    try {
+      value = { ...DEFAULT_ALERT_CONFIG, ...JSON.parse(raw) };
+    } catch {
+      value = DEFAULT_ALERT_CONFIG;
+    }
+  }
+  cached = { raw, value };
+  return value;
+}
+
+/** The server has no storage, so it always renders the defaults. */
+function readServer(): AlertConfig {
+  return DEFAULT_ALERT_CONFIG;
+}
 
 /**
  * Triggered alerts. Thresholds live in localStorage and the signal list recomputes
@@ -29,27 +68,22 @@ export function Signals({
   announcements: Announcement[];
   now: string;
 }) {
-  const [config, setConfig] = useState<AlertConfig>(DEFAULT_ALERT_CONFIG);
-  const [loaded, setLoaded] = useState(false);
+  // Saved thresholds are read through useSyncExternalStore rather than an effect, so the
+  // server and the first client render agree on the defaults and the stored value is
+  // applied in the same commit - no flash of default sliders, no cascading render.
+  const stored = useSyncExternalStore(subscribe, readStored, readServer);
+  const [override, setOverride] = useState<AlertConfig | null>(null);
+  const config = override ?? stored;
 
-  useEffect(() => {
+  const setConfig = (next: AlertConfig | ((p: AlertConfig) => AlertConfig)) => {
+    const value = typeof next === "function" ? next(config) : next;
+    setOverride(value);
     try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setConfig({ ...DEFAULT_ALERT_CONFIG, ...JSON.parse(raw) });
+      localStorage.setItem(KEY, JSON.stringify(value));
     } catch {
-      /* private mode or blocked storage - defaults are fine */
+      /* private mode or blocked storage - the session still works, it just won't persist */
     }
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!loaded) return;
-    try {
-      localStorage.setItem(KEY, JSON.stringify(config));
-    } catch {
-      /* ignore */
-    }
-  }, [config, loaded]);
+  };
 
   const signals = useMemo(
     () => evaluateSignals(series, announcements, config, 10),

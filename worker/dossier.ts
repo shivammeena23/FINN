@@ -259,6 +259,10 @@ export async function buildDossier(symbol: string, maxCalls = 4): Promise<Dossie
   const snap = await snapshot(sym, latest);
   const verdicts = await adjudicate(sym, collected, latest, metricsFor(sym));
 
+  // If adjudication never ran, every row would silently fall back to "open" and the
+  // ledger would look adjudicated when it is not. Say so instead.
+  const adjudicationFailed = verdicts === null;
+
   const promises: Promise_[] = collected.map((p, i) => {
     const v = verdicts?.find((x) => x.i === i);
     const evidence: Citation[] = [];
@@ -282,6 +286,9 @@ export async function buildDossier(symbol: string, maxCalls = 4): Promise<Dossie
 
   return {
     ...base,
+    degraded: adjudicationFailed
+      ? `Extracted ${promises.length} commitments for ${sym}, but the adjudication pass could not run (model unavailable). Verdicts below are not graded.`
+      : undefined,
     snapshot: snap
       ? {
           business: snap.business,
@@ -318,7 +325,7 @@ async function main() {
   }
 
   const ledger = writeLedger();
-  log("--- cost ledger (cumulative this run) ---");
+  log(`--- cost ledger: this run ~${ledger.total.usd.toFixed(4)}, cumulative ~${ledger.cumulative.usd.toFixed(4)} ---`);
   for (const r of ledger.byModel) {
     log(`  ${r.model}: ${r.calls} calls (${r.cached} cached) in=${r.inTokens} out=${r.outTokens} think=${r.thinkTokens} ~$${r.usd.toFixed(4)}`);
   }

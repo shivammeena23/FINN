@@ -236,7 +236,8 @@ async function main() {
   for (const r of ledger.byModel) {
     log(`  ${r.model}: ${r.calls} calls (${r.cached} cached) in=${r.inTokens} out=${r.outTokens} think=${r.thinkTokens} ~$${r.usd.toFixed(4)}`);
   }
-  log(`  TOTAL ~$${ledger.total.usd.toFixed(4)} across ${ledger.total.calls} live calls`);
+  log(`  this run ~${ledger.total.usd.toFixed(4)} across ${ledger.total.calls} live calls`);
+  log(`  cumulative ~${ledger.cumulative.usd.toFixed(4)} to build the whole corpus`);
 }
 
 main().catch((e) => {

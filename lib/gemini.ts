@@ -7,7 +7,8 @@ import { join } from "node:path";
  *
  * The brief rewards spending less for the same result, so routing is explicit:
  *
- *   Tier 0  rules      ~75% of filings never reach a model at all (lib/categories.ts)
+ *   Tier 0  rules      categorise + triage every filing; the buried pile (39% of the
+ *                     corpus) never reaches a model at all (lib/categories.ts, materiality.ts)
  *   Tier 1  flash-lite bulk one-line judgements, batched many filings per call
  *   Tier 2  flash-lite PDF -> structured numbers, native PDF input, no OCR pipeline
  *   Tier 3  flash+think the promised-vs-delivered reasoning, once per company
@@ -64,9 +65,8 @@ function note(model: string, patch: Partial<LedgerEntry>) {
   ledger.set(model, e);
 }
 
-export function writeLedger() {
-  const rows = [...ledger.values()];
-  const total = rows.reduce(
+const sum = (rows: LedgerEntry[]) =>
+  rows.reduce(
     (a, r) => ({
       calls: a.calls + r.calls,
       cached: a.cached + r.cached,
@@ -77,9 +77,53 @@ export function writeLedger() {
     }),
     { calls: 0, cached: 0, inTokens: 0, outTokens: 0, thinkTokens: 0, usd: 0 },
   );
-  const payload = { generatedAt: new Date().toISOString(), byModel: rows, total };
+
+/**
+ * Write the ledger, accumulating across runs.
+ *
+ * A single run's numbers understate what the pipeline actually cost to build, since most
+ * calls are served from cache on later runs. The cumulative block is the honest figure to
+ * quote; `lastRun` shows the marginal cost of running it again.
+ */
+export function writeLedger() {
+  const rows = [...ledger.values()];
+  const lastRun = sum(rows);
+
+  const prior: Record<string, LedgerEntry> = {};
+  let runs = 0;
+  try {
+    const old = JSON.parse(readFileSync(LEDGER, "utf8"));
+    runs = old.runs ?? 0;
+    for (const r of old.cumulative?.byModel ?? []) prior[r.model] = r;
+  } catch {
+    /* first run */
+  }
+
+  for (const r of rows) {
+    const p = prior[r.model];
+    prior[r.model] = p
+      ? {
+          model: r.model,
+          calls: p.calls + r.calls,
+          cached: p.cached + r.cached,
+          inTokens: p.inTokens + r.inTokens,
+          outTokens: p.outTokens + r.outTokens,
+          thinkTokens: p.thinkTokens + r.thinkTokens,
+          usd: p.usd + r.usd,
+        }
+      : { ...r };
+  }
+
+  const cumulativeRows = Object.values(prior);
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    runs: runs + 1,
+    note: "usd is notional at published list rates; actual spend on the free tier is $0.00",
+    lastRun: { byModel: rows, total: lastRun },
+    cumulative: { byModel: cumulativeRows, total: sum(cumulativeRows) },
+  };
   writeFileSync(LEDGER, JSON.stringify(payload, null, 2));
-  return payload;
+  return { byModel: rows, total: lastRun, cumulative: sum(cumulativeRows) };
 }
 
 export function ledgerSnapshot() {
@@ -106,13 +150,26 @@ interface CallOpts {
   fallbacks?: string[];
 }
 
-let client: any = null;
+type GenAIClient = {
+  models: {
+    generateContent: (req: unknown) => Promise<{
+      text?: string;
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        thoughtsTokenCount?: number;
+      };
+    }>;
+  };
+};
+
+let client: GenAIClient | null = null;
 async function getClient() {
   if (client) return client;
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) throw new Error("GEMINI_API_KEY is not set - copy .env.example to .env.local");
   const { GoogleGenAI } = await import("@google/genai");
-  client = new GoogleGenAI({ apiKey: key });
+  client = new GoogleGenAI({ apiKey: key }) as unknown as GenAIClient;
   return client;
 }
 

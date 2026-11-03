@@ -90,6 +90,15 @@ export async function fetchAnnouncementsFor(
   return Array.isArray(data) ? data : [];
 }
 
+interface YahooChart {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: { quote?: Array<{ close?: (number | null)[]; volume?: (number | null)[] }> };
+    }>;
+  };
+}
+
 export interface YahooBar {
   date: string;
   close: number;
@@ -99,7 +108,7 @@ export interface YahooBar {
 /** End-of-day closes and volumes. Yahoo's chart endpoint is plain JSON - no API key. */
 export async function fetchPrices(symbol: string, range = "1y"): Promise<YahooBar[]> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?range=${range}&interval=1d`;
-  const j = await getJson<any>(url);
+  const j = await getJson<YahooChart>(url);
   const r = j?.chart?.result?.[0];
   if (!r?.timestamp) return [];
   const closes: (number | null)[] = r.indicators?.quote?.[0]?.close ?? [];

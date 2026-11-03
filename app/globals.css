@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/*
+  FINN design tokens.
+
+  Dark-first and deliberately restrained: one warm accent for "act", one cool for
+  navigation, everything else greyscale. An investor tool should read like an instrument,
+  not a dashboard template - density and hierarchy do the work, colour is used sparingly
+  so that when something IS coloured it means something.
+*/
+:root {
+  --bg: #0b0d10;
+  --bg-raised: #131619;
+  --bg-sunken: #08090b;
+  --line: #22272d;
+  --line-soft: #1a1e23;
+
+  --ink: #e8eaed;
+  --ink-dim: #9aa3ad;
+  --ink-faint: #646d77;
+
+  --act: #ff6b4a;
+  --act-bg: #2a1410;
+  --watch: #e0b341;
+  --watch-bg: #231c0c;
+  --noise: #5a636d;
+
+  --up: #35c08a;
+  --down: #f2576b;
+  --accent: #6ea8fe;
+
+  --radius: 12px;
+  --tap: 44px;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-act: var(--act);
+  --color-watch: var(--watch);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  background: var(--bg);
+  /* Respect the iOS safe area so the bottom nav never sits under the home indicator. */
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: "cv01", "cv03", "ss01";
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* Numerals should align in columns wherever we show money. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* --- scrollbars: present but quiet ------------------------------------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --- primitives --------------------------------------------------------- */
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.rail {
+  width: 3px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
+/* Hide scrollbar on horizontal pill rows while keeping the scroll. */
+.no-bar {
+  scrollbar-width: none;
+}
+.no-bar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}

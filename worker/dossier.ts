@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { TIER, call, parseJson, writeLedger } from "../lib/gemini";
 import type { Announcement, Citation, Dossier, Promise_ } from "../lib/types";
 import { lookup } from "../lib/portfolio";
+import { checkQuote } from "./quotes";
 
 const CORPUS = join(process.cwd(), "data", "corpus");
 const OUT = join(CORPUS, "dossiers.json");
@@ -263,23 +264,37 @@ export async function buildDossier(symbol: string, maxCalls = 4): Promise<Dossie
   // ledger would look adjudicated when it is not. Say so instead.
   const adjudicationFailed = verdicts === null;
 
-  const promises: Promise_[] = collected.map((p, i) => {
+  let dropped = 0;
+  const promises: Promise_[] = [];
+  for (const [i, p] of collected.entries()) {
     const v = verdicts?.find((x) => x.i === i);
     const evidence: Citation[] = [];
+    let evidenceVerified: boolean | undefined;
+
     if (v?.evidence_quote) {
-      evidence.push({ doc: `Concall transcript ${latest.period}`, url: latest.url, quote: v.evidence_quote });
+      // Models paraphrase a document's facts into quote-shaped sentences. Check before trusting.
+      const status = await checkQuote(v.evidence_quote, latest.url);
+      if (status === "fabricated") {
+        dropped++;
+        evidenceVerified = false;
+      } else {
+        evidenceVerified = status === "verified";
+        evidence.push({ doc: `Concall transcript ${latest.period}`, url: latest.url, quote: v.evidence_quote });
+      }
     }
-    return {
+    promises.push({
       promise: p.promise,
       quote: p.quote,
       madeOn: p.period,
       horizon: p.horizon || "unspecified",
       actual: v?.actual ?? "Not addressed in the latest call.",
       verdict: v?.verdict ?? "too_early",
+      evidenceVerified,
       evidence,
       source: { doc: `Concall transcript ${p.period}`, url: p.url, quote: p.quote },
-    };
-  });
+    });
+  }
+  if (dropped) log(`  ${sym}: dropped ${dropped} evidence quote(s) that do not appear in the cited transcript`);
 
   const order = { missed: 0, partial: 1, kept: 2, too_early: 3 } as const;
   promises.sort((a, b) => order[a.verdict] - order[b.verdict]);

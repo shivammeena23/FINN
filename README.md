@@ -133,12 +133,31 @@ is **$0.00 notional too**, because every call is a cache hit. Each run rewrites
    columns flash left empty. Cheaper *and* better, so it won.
 3. **Quota exhaustion falls back a tier** rather than failing. A degraded answer beats an empty card.
 
-### Grounding discipline
+### Grounding discipline — enforced, not requested
 
 The pull side touches primary sources only — the company's own transcripts and its own reported
 figures. No news, no broker notes, and the prompts forbid the model from drawing on what it knows
-about the company from elsewhere. Every generated claim carries a citation that opens the source
-PDF. Where a dossier cannot be grounded, the app says so instead of inventing one.
+about the company from elsewhere. Where a dossier cannot be grounded, the app says so instead of
+inventing one.
+
+But asking a model not to fabricate quotes is a request, so FINN checks instead:
+
+```
+$ npm run audit
+[audit] 143/143 quotes verified verbatim in their cited PDF
+```
+
+Every quote is re-extracted from the PDF it cites and matched against it — at build time in
+`worker/dossier.ts`, and as a regression test in `worker/audit.ts` that exits non-zero on failure.
+
+**This caught a real failure.** The first audit run came back 143/148: five Asian Paints "evidence"
+quotes — *"PBDIT margin at 20.6%; higher by 240 bps yoy"* and similar — were investor-deck
+phrasings the model had paraphrased into quote form. The underlying figures were right; the
+quotation marks were not. They are now discarded automatically, and any verdict that loses its
+quote is labelled as such in the UI rather than shown with an invented one.
+
+That failure mode — facts reshaped into sentences nobody said — is precisely the "AI slop" the
+brief warns about, and it is invisible unless you check.
 
 (Push-side enrichment — an incoming executive's professional background — uses outside knowledge,
 which the brief explicitly permits.)
@@ -160,6 +179,7 @@ npm run rescore                     # re-triage offline after tuning rules
 cp .env.example .env.local          # add a free key: aistudio.google.com/apikey
 npm run enrich                      # Tiers 1–2
 npm run dossier -- RELIANCE DIXON   # Tier 3
+npm run audit                       # verify every quote resolves to its source
 ```
 
 ---

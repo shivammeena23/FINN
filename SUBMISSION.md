@@ -49,6 +49,13 @@ source PDF. Where the documents don't actually settle a question, the verdict is
 is explicit that abstaining beats guessing. KPIT's entire ledger is `OPEN`, correctly, because its
 guidance is FY27/FY29 targets that haven't matured.
 
+**And the quotes are checked, not trusted.** `npm run audit` re-extracts every cited PDF and asserts
+each quote appears in it — currently 143/143. That check earned its keep immediately: the first run
+came back 143/148, having caught five Asian Paints "evidence" quotes that were investor-deck
+phrasings the model had paraphrased into quote form. Right numbers, invented quotation marks. They
+are now dropped automatically at build time, and a verdict that loses its quote says so in the UI.
+That failure mode is exactly the slop you warned about, and it is invisible unless you test for it.
+
 ### Key decisions and trade-offs
 
 **Ingestion is decoupled from serving.** NSE and screener.in throttle datacenter IPs, so an app

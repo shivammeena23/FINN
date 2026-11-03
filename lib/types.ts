@@ -137,6 +137,12 @@ export interface Promise_ {
   /** What the subsequent filings actually showed. */
   actual: string;
   verdict: "kept" | "partial" | "missed" | "too_early";
+  /**
+   * Evidence quotes are checked against the cited PDF at build time; any that does not
+   * appear verbatim is discarded. False means the verdict stands on the reasoning pass
+   * but lost its quote, and the UI says so rather than showing an invented one.
+   */
+  evidenceVerified?: boolean;
   evidence: Citation[];
   source: Citation;
 }

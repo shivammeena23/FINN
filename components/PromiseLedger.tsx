@@ -99,6 +99,12 @@ function Row({ p }: { p: Promise_ }) {
           {p.evidence.map((e, i) => (
             <Quote key={i} label={`Evidence · ${e.doc}`} text={e.quote ?? ""} url={e.url} />
           ))}
+          {p.evidenceVerified === false && (
+            <p className="mt-2 text-[11px] leading-[1.5]" style={{ color: "var(--ink-faint)" }}>
+              This verdict comes from the latest call, but the supporting quote did not appear
+              verbatim in it and was discarded. Read the transcript before relying on it.
+            </p>
+          )}
         </div>
       )}
     </article>

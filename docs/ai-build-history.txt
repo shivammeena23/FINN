@@ -1,0 +1,2936 @@
+ ▐▛███▛█   Claude Code v2.1.258
+▝▜██████▀  Opus 5 · Claude Max
+  ▝▝ ▝▝    ~\OneDrive\Desktop\Mentee-Selection-Mailer\FINN
+
+⚠ Your login expires in 3 days · run /login to renew
+
+❯ & 'c:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\1.                 
+  ENAM_AI_Engineer_Build_Challenge_Main.pdf'&                                   
+  'c:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\2.                   
+  ENAM_AI_Engineer_Build_Challenge_Reference.pdf' read these pdfs and create a  
+  plan                                                                          
+
+● I'll read both PDFs first.
+
+  Read 2 files, ran 1 shell command (ctrl+o to expand)
+
+● Both PDFs read. Before I plan — one note: the brief's stated deadline is
+  Sunday, Nov 1, 2026, and today is Nov 3. I'll assume you have an extension or
+  are building this anyway; tell me if the timeline is different from what I ask
+  below.
+
+  Let me quickly probe whether the key data sources are actually reachable,
+  since that drives the whole architecture.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● All three data sources are confirmed live from your machine:
+
+  - Yahoo Finance chart API — plain JSON, no key, no library
+    (query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS) ✅
+  - NSE corporate-announcements API — works unauthenticated, returns symbol,
+    desc (maps almost 1:1 to the reference doc's categories), attchmntText, and
+    a direct PDF URL ✅ — this is the backbone of the Push side
+  - screener.in — serves annual-report PDFs and concall-transcript PDFs ✅ —
+    backbone of the Pull side
+  - BSE API returns 403 (NSE covers it, so no loss)
+
+  The catch: these work from a residential IP. From Vercel/datacenter IPs, NSE
+  and screener.in commonly block — which shapes the architecture. A few
+  decisions I need from you before I write the plan.
+
+● User answered Claude's questions:
+  ⎿  · What stack should FINN be built on? (It must be easy for ENAM to open on 
+     a phone.) → Next.js PWA on Vercel (Recommended)
+     · How should the deployed app get its data, given NSE/screener.in block 
+     datacenter IPs? → Pre-ingest to DB + live fallback (Recommended)
+     · Which LLM provider(s) do you have working API keys for? (The brief 
+     explicitly rewards cheap-model-for-bulk / strong-model-for-reasoning 
+     routing.) → Google Gemini
+     · How much build time do you actually have? This sets how much of the 
+     brief's menu I scope in. → Already late — fastest shippable thing
+
+● All four answered. Given "already late — fastest shippable," I'm going to make
+  one deliberate deviation from the data-strategy option you picked, and I'll
+  flag it rather than bury it: stage-0 storage is a committed JSON corpus, not 
+  Supabase. Same worker, same schema, same live-fallback for any-ticker — but
+  zero provisioning, so there's a running deployed demo within hours instead of
+  after an infra detour. Supabase becomes a documented swap of the sink. The
+  reason you rejected the pure-snapshot option (any-ticker support) is preserved
+  by the live Pull route.
+
+  Let me write the plan.
+
+● Updated plan
+  ⎿  /plan to preview
+
+● User approved Claude's plan
+  ⎿  Plan saved to: 
+     ~\.claude\plans\c-users-yuta1-onedrive-desktop-mentee-s-mutable-quilt.md · 
+     /plan to edit
+     FINN — ENAM AI Engineer Build Challenge
+
+     Context
+
+     ENAM Holdings' build challenge asks for FINN, a mobile-first financial
+     investment agent with two
+     interaction modes: Push (it tells you what changed and why you should care)
+     and Pull
+     (on-demand research grounded strictly in primary sources). The brief grades
+     creativity, product
+     sense, judgment, and architecture — explicitly not completeness, and states
+     that "thin-but-working
+     beats broad-but-broken" and "a demo that doesn't run is the worst outcome."
+
+     The stated deadline (Sun Nov 1, 2026) has passed; today is Nov 3. So this
+     plan optimises for
+     one impressive thing that runs and ships today, with everything cut named
+     honestly in the
+     covering note — which the brief asks for anyway ("what you deliberately
+     left out").
+
+     Decisions already made: Next.js PWA on Vercel · pre-ingested corpus + live
+     fallback ·
+     Google Gemini only (free tier) · fastest shippable scope.
+
+     Verified data sources (probed live from this machine, Nov 3)
+
+     Source: Yahoo Finance query1.finance.yahoo.com/v8/finance/chart/{SYM}.NS
+     Status: ✅ 200, plain JSON
+     Notes: No API key, no yfinance needed — removes the Python dependency
+     ────────────────────────────────────────
+     Source: NSE
+     nseindia.com/api/corporate-announcements?index=equities[&symbol=X]
+     Status: ✅ 200, unauthenticated
+     Notes: Returns symbol, desc, attchmntText, attchmntFile (direct PDF),
+     an_dt.
+     desc maps near-1:1 onto the reference doc's 17 categories
+     ────────────────────────────────────────
+     Source: screener.in /company/{SYM}/
+     Status: ✅ 200
+     Notes: Serves annual-report PDF links (company IR) and concall-transcript
+     PDF
+     links (BSE AnnPdfOpen.aspx)
+     ────────────────────────────────────────
+     Source: BSE api.bseindia.com/.../AnnSubCategoryGetData
+     Status: ❌ 403
+     Notes: Not needed — NSE covers it
+
+     Critical constraint: these work from a residential IP. NSE and screener.in
+     commonly block
+     datacenter IPs, so the deployed app must never depend on a live scrape for 
+     the Push demo.
+     Ingestion and serving are decoupled.
+
+     Two architectural simplifications that buy most of the speed
+
+     1. Gemini accepts PDFs natively. Results filings, annual reports, and
+        concall transcripts go
+        straight to the model as PDF bytes. This deletes the entire
+        pdfplumber/OCR pipeline.
+     2. Every source is plain HTTP JSON or HTML. Combined with (1), there is no
+        reason to run a
+        Python worker. One TypeScript toolchain, one npm install.
+
+     ---
+
+     Product point of view
+
+     ▎ An investor's inbox should be a triage queue, not a feed.
+
+     Most submissions will be "dashboard + chatbot." FINN's differentiator is
+     that it is opinionated
+     about what you should not read. Three surfaces, all mobile-first.
+
+     1. The Brief — windowed digest (Push flavour 1)
+
+     Default window 24h, with a picker (24h / 7d / 30d / custom). Every
+     portfolio announcement in the
+     window is scored and bucketed:
+
+     - ACT — material, needs a decision today
+     - WATCH — relevant, read when you can
+     - NOISE — collapsed to a single line: 41 routine filings hidden ▸
+
+     Burying the noise visibly is the product statement. Each ACT/WATCH card
+     carries: company,
+     category chip, a one-line "why it matters" (a judgment, not a summary), and
+     a source chip that
+     opens the actual filing PDF.
+
+     Two enriched card types, exactly as the brief calls out:
+     - Results filing → auto-extracted Revenue / EBITDA / PBT / PAT table with
+       QoQ and YoY deltas.
+     - Management change → a short background on the incoming person (push-side
+       enrichment from
+       outside sources is explicitly allowed by the brief).
+
+     2. Signals — triggered alerts (Push flavour 2)
+
+     User-configurable thresholds, the point being the investor decides what 
+     "unusual" means:
+     - volume > N× trailing 20-day average (default 2×)
+     - absolute price move beyond ±X% in a day (default 4%)
+     - "always alert me on these categories" (results, M&A, management_change,
+       …)
+
+     Rendered as a compact rules sheet, with fired alerts injected inline at the
+     top of The Brief.
+
+     3. Dossier — grounded research (Pull)
+
+     Enter any NSE ticker → research grounded only in annual reports + concall
+     transcripts.
+     For the fastest-shippable cut, build two views exceptionally well rather
+     than eight thinly:
+
+     - Promised vs Delivered ← the signature feature. The brief says this is
+       "the kind of thing we
+       value most." Extract management's explicit guidance from the last ~4
+       concall transcripts, pair
+       each promise with what the subsequent results actually showed, and render
+       a ledger:
+       promise → horizon → actual → ✅ Kept / ⚠️ Partial / ❌ Missed, each row
+       expanding to the
+       verbatim quote and a link to the source page.
+     - Snapshot — compact business + financial header (what they do, segment
+       mix, headline numbers,
+       multi-year trajectory sparkline) so the ledger has context.
+     - (stretch, cheap — one extra call over already-extracted material) Bull vs
+       Bear, two tight cards.
+
+     Anti-slop discipline: nothing renders without a citation chip. The Pull
+     extractor only ever
+     sees retrieved primary-source text, and its system prompt forbids outside
+     knowledge, news, and
+     broker commentary — enforced structurally, not just asked for.
+
+     ---
+
+     Architecture
+
+     worker/  (runs on your residential IP, or GitHub Actions cron)
+       nse.ts        announcements  ─┐
+       yahoo.ts      EOD price/vol  ─┼──▶  data/corpus/*.json  ──▶  Next.js on
+     Vercel
+       screener.ts   AR + concalls  ─┘       (committed)              (reads
+     corpus)
+       enrich.ts     tiered Gemini calls + content-hash cache
+                                                                       │
+                           app/api/dossier/[ticker]  ──live fetch──────┘
+                           (any NSE ticker; falls back to corpus)
+
+     Storage — deliberate deviation, flagged. Stage 0 writes a committed JSON 
+     corpus under
+     data/corpus/ rather than provisioning Supabase. Identical schema, zero
+     infra, deploy works on
+     first try. Supabase becomes a sink swap behind lib/store.ts if time allows.
+     The reason you
+     rejected a pure snapshot — "we may point it at a company you didn't pick" —
+     is preserved by the
+     live /api/dossier/[ticker] route, which fetches NSE + screener.in on
+     demand.
+
+     Model routing — the efficiency story (explicit bonus points)
+
+     ┌──────┬───────────────────┬────────────────────────────────┬─────────────┐
+     │ Tier │       Model       │              Job               │  Share of   │
+     │      │                   │                                │   volume    │
+     ├──────┼───────────────────┼────────────────────────────────┼─────────────┤
+     │      │                   │ Map NSE desc → the 17          │ ~80% of     │
+     │ 0    │ none — rules      │ reference categories;          │ filings, ₹0 │
+     │      │                   │ hard-drop known noise          │             │
+     ├──────┼───────────────────┼────────────────────────────────┼─────────────┤
+     │ 1    │ gemini-flash-lite │ One-line "why it matters" +    │ surviving   │
+     │      │                   │ materiality score, batched     │ filings     │
+     ├──────┼───────────────────┼────────────────────────────────┼─────────────┤
+     │      │                   │ Results PDF → structured       │ results     │
+     │ 2    │ gemini-flash      │ Revenue/EBITDA/PBT/PAT (native │ filings     │
+     │      │                   │  PDF input)                    │ only        │
+     ├──────┼───────────────────┼────────────────────────────────┼─────────────┤
+     │ 3    │ gemini-pro        │ Promised-vs-delivered          │ handful of  │
+     │      │                   │ reasoning; once per company    │ calls       │
+     └──────┴───────────────────┴────────────────────────────────┴─────────────┘
+
+     Plus a content-hash cache (sha256(source bytes + prompt version)) so
+     re-runs cost nothing, and
+     a token/cost ledger written to data/cost-report.json and surfaced in the
+     README. Concrete
+     numbers beat claiming you were efficient.
+
+     ▎ ⚠️ Verify Gemini model IDs against the live API before hardcoding — do 
+     ▎ not trust remembered
+     ▎ model strings. GET 
+     ▎ https://generativelanguage.googleapis.com/v1beta/models?key=$KEY and pick
+     ▎ the
+     ▎ cheapest/strongest available tiers.
+
+     ---
+
+     Repository
+
+     Create a fresh repo — do not reuse Mentee-Selection-Mailer. That repo holds
+     an unrelated Go
+     mailer project whose files are currently deleted-but-uncommitted; the
+     submission repo should not
+     carry its history, and its working tree should be left alone rather than
+     destroyed.
+
+     New location: C:\Users\yuta1\OneDrive\Desktop\FINN\ (git init, new GitHub
+     repo finn).
+     Copy both challenge PDFs into docs/brief/ for reference.
+
+     FINN/
+       app/
+         page.tsx                  The Brief (home)
+         signals/page.tsx          threshold config + fired alerts
+         dossier/[ticker]/page.tsx Pull research view
+         api/dossier/[ticker]/     live fetch for arbitrary tickers
+       components/                 Card, TriageBucket, CitationChip,
+     MetricsTable, PromiseLedger
+       lib/
+         categories.ts             the 17 reference categories + rules mapper
+         materiality.ts            ACT / WATCH / NOISE scoring
+         gemini.ts                 tiered router + cache + cost ledger
+         store.ts                  corpus reader (Supabase swap point)
+       worker/                     nse.ts yahoo.ts screener.ts enrich.ts run.ts
+       data/corpus/                committed ingested JSON
+       docs/brief/                 the two challenge PDFs
+
+     Portfolio (16–18, mixed sector and size)
+
+     RELIANCE, HDFCBANK, INFY, TATAMOTORS, SUNPHARMA, LT, MARUTI, ITC,
+     BHARTIARTL, ASIANPAINT,
+     TRENT, POLYCAB, DIXON, IRCTC, DEEPAKNTR, KPITTECH, CAMS, PERSISTENT.
+
+     Ad-hoc demo set (outside portfolio): ASTRAL, NYKAA, AFFLE, SUPREMEIND.
+
+     The worker must validate every ticker against Yahoo + NSE at ingest and 
+     drop failures loudly —
+     tickers rename (Zomato → ETERNAL), so do not assume any symbol in this list
+     resolves.
+
+     ---
+
+     Build order — hour-boxed, with an early demo gate
+
+     Milestone A — skeleton that runs (≈1h). create-next-app + Tailwind,
+     mobile-first shell,
+     three routes rendering hardcoded placeholder cards. Deploy to Vercel
+     immediately. From this point
+     there is always a working link.
+
+     Milestone B — ingestion (≈2h). worker/ pulls NSE announcements for the
+     portfolio over the last
+     ~45 days, Yahoo EOD for ~6 months, and screener.in AR/transcript links.
+     Write data/corpus/.
+     Rules-only categorisation (Tier 0) — no LLM yet. The Brief now renders real
+     filings, bucketed by
+     rules alone. This is the demo-ready gate: if everything after this fails, 
+     the submission still runs.
+
+     Milestone C — Push enrichment (≈2h). Tier 1 "why it matters" + materiality
+     scores. Tier 2
+     results-PDF extraction → Revenue/EBITDA/PBT/PAT with QoQ/YoY.
+     Management-change bios. Cost ledger on.
+
+     Milestone D — Signals (≈1h). Threshold config persisted to localStorage,
+     evaluated against
+     Yahoo EOD, alerts injected into The Brief.
+
+     Milestone E — Dossier (≈2.5h). Snapshot + Promised vs Delivered ledger with
+     citation chips.
+     Live /api/dossier/[ticker] path for arbitrary tickers with corpus fallback.
+
+     Milestone F — ship (≈1h). PWA manifest + icons, mobile polish pass on a
+     real phone viewport,
+     README (architecture, cost ledger, tradeoffs), export the Claude Code
+     session as AI build history,
+     covering note.
+
+     If time runs out, cut in this order: Bull vs Bear → management-change bios
+     → Signals config UI
+     (ship with fixed defaults) → live any-ticker route (ship corpus-only, and
+     say so).
+
+     ---
+
+     Verification
+
+     1. Sources still live: re-run the probes above before building — NSE in
+        particular can change.
+     2. Worker: npx tsx worker/run.ts → assert data/corpus/announcements.json is
+        non-empty, every
+        portfolio ticker has EOD rows, and ticker-validation failures are
+        printed not swallowed.
+     3. Categorisation sanity: spot-check 20 filings against the reference doc's
+        table; confirm the
+        NOISE bucket actually captures ESOP allotments / compliance
+        certificates.
+     4. Numbers correctness: for 2–3 results filings, open the source PDF and
+        confirm the extracted
+        Revenue/EBITDA/PBT/PAT and the QoQ/YoY arithmetic by hand. Wrong numbers
+        are worse than no
+        numbers for this audience.
+     5. Grounding audit: pick 5 Dossier claims at random, open each citation,
+        confirm the quote
+        exists in the cited document. Any claim without a resolvable citation is
+        a bug.
+     6. Generalisation: hit /dossier/ASTRAL and one ticker not in any list — it
+        must degrade
+        gracefully with a clear message, never crash or hallucinate.
+     7. Mobile: open the deployed Vercel URL on an actual phone. Chrome DevTools
+        device mode is not
+        sufficient evidence for a brief that says "mobile-first" four times.
+     8. Cold start: clone the repo fresh, npm i, npm run dev with no API key set
+        — the Push demo
+        must still render from the committed corpus.
+
+     Submission
+
+     Email assessment@enam.com, subject exactly "ENAM - IIT screening - 2027",
+     containing:
+     deployed Vercel link · GitHub repo link · AI build-history export ·
+     covering note (what you built,
+     key decisions and tradeoffs, what you deliberately left out, where you'd
+     take it next).
+
+     Note in the covering email that the submission is past the Nov 1 deadline.
+
+● Plan approved. Starting with Milestone A — a running skeleton.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Node 22 + npm 11, good. Scaffolding the app.
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ c:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN push all code    
+  here                                                                          
+
+● Understood — building in Mentee-Selection-Mailer\FINN. I'll git init inside
+  that folder so the submission repo has clean history rather than inheriting
+  the Go mailer's.
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+● Next 16.4.4 + React 19.3 + Tailwind v4. I'll turn off cacheComponents (Next
+  16's new caching model needs "use cache" ceremony that would slow us down) and
+  install deps.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Installed. Now let me sample the real NSE desc values so the rules-based
+  categoriser is built on actual data, not guesses.
+
+  Ran 2 shell commands (ctrl+o to expand)
+● Only the latest 20 by default. Let me test the date-range and symbol-scoped
+  forms.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Date-ranged all-equities query works: 7,542 filings, 1,781 symbols, 105 
+  distinct desc types in one call. That's the whole Push feed in a single fetch.
+  Let me get the full taxonomy to build the rules mapper.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now I have the real taxonomy. Building the domain layer — categories mapper
+  grounded in those actual 105 desc values.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Types clean (the LayoutProps error is just Next's generated types not existing
+  until first build — I'll replace it anyway). Now the categoriser.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Heredoc choked on the regex content — switching to the Write tool for this
+  one.
+
+● Write(lib\categories.ts)
+  ⎿  Wrote 240 lines to lib\categories.ts
+       1 import type { Category } from "./types";
+       3 /**
+       4  * Tier 0 of the model router: pure rules, zero tokens.
+       5  *
+         cleanly onto ENAM's 17
+       7  * reference categories. Mapping it with rules means most filing
+       8  * Where `desc` is genuinely ambiguous ("Outcome of Board Meetin
+         g" covers results,
+       9  * dividends, M&A and resignations alike) we refine using the at
+      10  */
+     … +283 lines (ctrl+o to expand)
+
+● Now the triage scorer — the piece that encodes the product's opinion about
+  what to bury.
+
+● Write(lib\materiality.ts)
+  ⎿  Wrote 98 lines to lib\materiality.ts
+       1 import type { Bucket, Category } from "./types";
+       3 /**
+       4  * Triage. This file is the product's opinion.
+       5  *
+          "surfacing the few things
+       7  * that actually matter and burying everything else". So every f
+       8  * from a category base plus text modifiers, and the score picks
+          a bucket.
+       9  *
+          an LLM judgement call:
+     … +124 lines (ctrl+o to expand)
+
+● Now let me validate the proposed portfolio tickers against both Yahoo and NSE
+  before committing to the list.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Validation already earned its keep — ZOMATO is dead, ETERNAL is live, and
+  TATAMOTORS has zero filings. Let me check what happened to Tata Motors.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Tata Motors demerged into TMCV (commercial) and TMPV (passenger). I'll use
+  TMCV. Now validating all tickers against Yahoo EOD.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 23 validate. Writing the portfolio and the ingestion worker.
+
+● Write(lib\portfolio.ts)
+  ⎿  Wrote 52 lines to lib\portfolio.ts
+       1 import type { Company } from "./types";
+       3 /**
+       4  * A mock portfolio of 18 NSE-listed companies, spread across se
+         ctors and market caps
+       6  *
+       7  * Every symbol here was validated against both the live NSE ann
+       8  * Yahoo EOD before being committed - which is how we caught tha
+         t ZOMATO is now ETERNAL
+       9  * and that TATAMOTORS has split into TMCV (commercial) and TMPV
+      10  */
+     … +64 lines (ctrl+o to expand)
+
+● Write(worker\sources.ts)
+  ⎿  Wrote 175 lines to worker\sources.ts
+      1 /**
+      2  * Thin clients for the three primary sources. Deliberately plain
+      3  * turned out to be either JSON or HTML over plain HTTP, so there
+         is no scraping framework
+      4  * and no Python here.
+      6  * These run from a residential IP (your machine or a GitHub Acti
+        ons runner), never from
+      7  * the deployed app: NSE and screener.in both throttle datacenter
+      8  * must not depend on a live scrape succeeding.
+      9  */
+     … +202 lines (ctrl+o to expand)
+
+● Let me verify the screener.in selectors against the real HTML before trusting
+  them.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Selectors work. The Concalls section needs the date, which lives outside the
+  link text — let me check that row structure.
+
+  Ran 1 shell command (ctrl+o to expand)
+● Now I have exact structure. Rewriting the docs scraper to capture concall
+  dates — essential for Promised vs Delivered.
+
+● Update(worker\sources.ts)
+  ⎿  Added 16 lines
+      122    kind: "annual_report" | "transcript" | "ppt";
+      123    label: string;
+      124    url: string;
+      125 +  /** "Nov 2026" for concalls, "2026" for annual reports. Driv
+          +es chronological ordering. */                                 
+      126 +  period: string;                                             
+      127 +  /** Sortable YYYY-MM derived from `period`. */              
+      128 +  sortKey: string;                                            
+      129  }
+      130  
+      131 +const MONTHS: Record<string, string> = {                      
+      132 +  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: 
+          +"06",                                                         
+      133 +  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: 
+          +"12",                                                         
+      134 +};                                                            
+      135 +                                                              
+      136 +function toSortKey(period: string): string {                  
+      137 +  const m = period.match(/([A-Za-z]{3})[a-z]*\s+(\d{4})/);    
+      138 +  if (m) return `${m[2]}-${MONTHS[m[1].toLowerCase()] ?? "01"}
+          +`;                                                            
+      139 +  const y = period.match(/(\d{4})/);                          
+      140 +  return y ? `${y[1]}-12` : "0000-00";                        
+      141 +}                                                             
+      142 +                                                              
+      143  /**
+      144   * Annual reports and concall transcripts from screener.in.
+      145   *
+
+● Update(worker\sources.ts)
+  ⎿  Added 41 lines, removed 19 lines
+      160    const docs: FundamentalDoc[] = [];
+      161    const seen = new Set<string>();
+      162  
+      163 -  const push = (kind: FundamentalDoc["kind"], label: string, h
+          -ref?: string) => {                                            
+      164 -    if (!href) return;                                        
+      163 +  const push = (kind: FundamentalDoc["kind"], label: string, p
+          +eriod: string, href?: string) => {                            
+      164 +    if (!href || href.startsWith("#")) return;                
+      165      const url = href.startsWith("http") ? href : `https://www.
+           screener.in${href}`;
+      166      if (seen.has(url)) return;
+      167      seen.add(url);
+      168 -    docs.push({ kind, label: label.replace(/\s+/g, " ").trim()
+          -, url });                                                     
+      168 +    docs.push({                                               
+      169 +      kind,                                                   
+      170 +      label: label.replace(/\s+/g, " ").trim(),               
+      171 +      url,                                                    
+      172 +      period,                                                 
+      173 +      sortKey: toSortKey(period),                             
+      174 +    });                                                       
+      175    };
+      176  
+      171 -  // screener groups documents under headed lists; walk each a
+          -nd label by its heading.                                      
+      177    $("div.documents").each((_, section) => {
+      173 -    const heading = $(section).find("h3").first().text().toLow
+          -erCase();                                                     
+      174 -    const kind: FundamentalDoc["kind"] = heading.includes("ann
+          -ual")                                                         
+      175 -      ? "annual_report"                                       
+      176 -      : heading.includes("concall")                           
+      177 -        ? "transcript"                                        
+      178 -        : "ppt";                                              
+      179 -    $(section)                                                
+      180 -      .find("a")                                              
+      181 -      .each((__, a) => {                                      
+      182 -        const text = $(a).text();                             
+      183 -        const href = $(a).attr("href");                       
+      184 -        if (!href || /^#/.test(href)) return;                 
+      185 -        if (kind === "transcript" && !/transcript|notes/i.test
+          -(text)) return; // skip PPT/REC rows                          
+      186 -        push(kind, `${$(section).find("h3").first().text().tri
+          -m()} ${text}`, href);                                         
+      187 -      });                                                     
+      178 +    const heading = $(section).find("h3").first().text().trim(
+          +);                                                            
+      179 +                                                              
+      180 +    // Annual reports: the year lives in the link text ("Annua
+          +l Report 2026").                                              
+      181 +    if (/annual/i.test(heading)) {                            
+      182 +      $(section)                                              
+      183 +        .find("li a")                                         
+      184 +        .each((__, a) => {                                    
+      185 +          const text = $(a).text().replace(/\s+/g, " ").trim()
+          +;                                                             
+      186 +          if (!/annual report/i.test(text)) return;           
+      187 +          push("annual_report", text, text.match(/(\d{4})/)?.[
+          +1] ?? "", $(a).attr("href"));                                 
+      188 +        });                                                   
+      189 +      return;                                                 
+      190 +    }                                                         
+      191 +                                                              
+      192 +    // Concalls: each <li> holds a period div plus Transcript 
+          +/ PPT / REC chips.                                            
+      193 +    if (/concall/i.test(heading)) {                           
+      194 +      $(section)                                              
+      195 +        .find("li")                                           
+      196 +        .each((__, li) => {                                   
+      197 +          const period = $(li).children("div").first().text().
+          +replace(/\s+/g, " ").trim();                                  
+      198 +          $(li)                                               
+      199 +            .find("a")                                        
+      200 +            .each((___, a) => {                               
+      201 +              const text = $(a).text().trim();                
+      202 +              const href = $(a).attr("href");                 
+      203 +              // Only the raw transcript PDF is a primary sour
+          +ce. REC is YouTube; PPT is a deck.                            
+      204 +              if (/^transcript$/i.test(text)) push("transcript
+          +", `Concall transcript ${period}`, period, href);             
+      205 +              else if (/^ppt$/i.test(text)) push("ppt", `Inves
+          +tor presentation ${period}`, period, href);                   
+      206 +            });                                               
+      207 +        });                                                   
+      208 +    }                                                         
+      209    });
+      210  
+      211 +  docs.sort((a, b) => b.sortKey.localeCompare(a.sortKey));    
+      212    return docs;
+      213  }
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Need ESM — I'll wrap in async main(), which also suits the worker scripts.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All three sources work end-to-end — 19 transcripts, 15 annual reports, 127
+  price bars. Now the ingestion worker.
+
+● Write(worker\run.ts)
+  ⎿  Wrote 169 lines to worker\run.ts
+       1 /**
+       2  * Ingestion worker. Run with `npm run ingest`.
+       4  * Produces data/corpus/*.json, which the deployed app reads. No
+         thing in the web app
+       5  * ever scrapes NSE or screener.in on the push path - that keeps
+       6  * immune to the datacenter-IP blocking both sources apply.
+       7  *
+       8  * This pass is Tier 0 of the model router: pure rules, zero tok
+       9  * `npm run enrich` adds the LLM layer on top.
+      10  */
+     … +187 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Corpus built: 438 filings, 23 symbols, ACT=95 / WATCH=184 / NOISE=159. The
+  ITC/TRENT transcript warnings fired correctly (neither holds concalls). Let me
+  spot-check triage quality — plan verification step 3.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Triage is directionally right but I can see three real misfires. Let me look
+  closer before fixing.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now I can see exactly what's wrong. The NAUKRI MD & CEO transition at 96 is
+  correct — that's the kind of item that should top the feed. But routine
+  allotments and quarterly compliance reports are leaking into WATCH. Fixing the
+  modifiers:
+
+● Update(lib\materiality.ts)
+  ⎿  Added 6 lines
+      48  
+      49    // --- suppress ---------------------------------------------
+          --------------
+      50    { re: /audio recording/i, delta: -22, note: "audio only, tran
+          script is the signal" },
+      51 +  // Share allotments are mostly ESOP/warrant housekeeping. Sup
+         +press the generic case and                                     
+      52 +  // let the "equity event" modifier above lift genuine QIP/rig
+         +hts/preferential raises back up.                               
+      53 +  { re: /allotment of [\d,]+ (equity shares?|securities|shares?
+         +)/i, delta: -24, note: "routine share allotment" },            
+      54 +  { re: /pursuant to (the )?conversion of (share )?warrants?/i,
+         + delta: -16, note: "warrant conversion" },                     
+      55 +  { re: /statement of deviation|variation\(s\) under Reg/i, del
+         +ta: -34, note: "quarterly deviation statement" },              
+      56 +  { re: /monitoring agency report/i, delta: -34, note: "monitor
+         +ing agency filing" },                                          
+      57    { re: /intimation of|prior intimation|notice of (the )?board 
+          meeting/i, delta: -16, note: "advance notice, not the event" },
+      58    { re: /newspaper (publication|advertisement)|public notice/i,
+           delta: -28, note: "newspaper copy" },
+      59    { re: /trading window|closure of trading window/i, delta: -40
+          , note: "trading-window housekeeping" },
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Rather than refetch 23MB to test scoring changes, let me add a rescore utility
+  — useful for tuning triage generally.
+
+● Write(worker\rescore.ts)
+  ⎿  Wrote 46 lines to worker\rescore.ts
+       1 /**
+         thout re-fetching.
+       3  *
+       4  * Triage rules are the part of this system most worth tuning, a
+       5  * NSE to test a regex change is wasteful. The raw NSE fields ar
+         e preserved in the corpus,
+         `.
+       7  */
+       8 import { readFileSync, writeFileSync } from "node:fs";
+      10 import { classify } from "../lib/categories";
+     … +45 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● ESOP paperwork now at score 8, real QIP allotments at 44, NCD raise at 68. Let
+  me check corpus size before wiring the app's data layer.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 824K total — comfortably committable. Now the data layer and formatting
+  helpers.
+
+● Write(lib\store.ts)
+  ⎿  Wrote 100 lines to lib\store.ts
+       1 import "server-only";
+       2 import { readFileSync } from "node:fs";
+       3 import { join } from "node:path";
+       5 
+       6 /**
+       7  * Corpus reader. The single place the app gets push-side data.
+       8  *
+         the deploy cannot fail
+      10  * because a scrape failed. Everything below is deliberately beh
+         ind one module so moving
+     … +99 lines (ctrl+o to expand)
+
+● Write(lib\signals.ts)
+  ⎿  Wrote 99 lines to lib\signals.ts
+      1 import type { Announcement, AlertConfig, Bar, Signal } from "./ty
+        pes";
+      2 
+      4  * Triggered alerts (push flavour 2).
+      5  *
+      6  * Thresholds are the investor's to set, not ours - the brief is 
+        explicit that the point
+        f (data, config) and
+      8  * recomputes instantly when the investor moves a slider.
+      9  */
+     … +103 lines (ctrl+o to expand)
+● Now the design system. I'm going dark-first — a professional instrument, not a
+  pastel AI demo.
+
+● Write(app\globals.css)
+  ⎿  Added 130 lines, removed 12 lines
+        1  @import "tailwindcss";
+        2  
+        3 +/*                                                            
+        4 +  FINN design tokens.                                         
+        5 +                                                              
+        6 +  Dark-first and deliberately restrained: one warm accent for 
+          +"act", one cool for                                           
+        7 +  navigation, everything else greyscale. An investor tool shou
+          +ld read like an instrument,                                   
+        8 +  not a dashboard template - density and hierarchy do the work
+          +, colour is used sparingly                                    
+        9 +  so that when something IS coloured it means something.      
+       10 +*/                                                            
+       11  :root {
+        4 -  --background: #ffffff;                                      
+        5 -  --foreground: #171717;                                      
+       12 +  --bg: #0b0d10;                                              
+       13 +  --bg-raised: #131619;                                       
+       14 +  --bg-sunken: #08090b;                                       
+       15 +  --line: #22272d;                                            
+       16 +  --line-soft: #1a1e23;                                       
+       17 +                                                              
+       18 +  --ink: #e8eaed;                                             
+       19 +  --ink-dim: #9aa3ad;                                         
+       20 +  --ink-faint: #646d77;                                       
+       21 +                                                              
+       22 +  --act: #ff6b4a;                                             
+       23 +  --act-bg: #2a1410;                                          
+       24 +  --watch: #e0b341;                                           
+       25 +  --watch-bg: #231c0c;                                        
+       26 +  --noise: #5a636d;                                           
+       27 +                                                              
+       28 +  --up: #35c08a;                                              
+       29 +  --down: #f2576b;                                            
+       30 +  --accent: #6ea8fe;                                          
+       31 +                                                              
+       32 +  --radius: 12px;                                             
+       33 +  --tap: 44px;                                                
+       34  }
+       35  
+       36  @theme inline {
+        9 -  --color-background: var(--background);                      
+       10 -  --color-foreground: var(--foreground);                      
+       37 +  --color-bg: var(--bg);                                      
+       38 +  --color-bg-raised: var(--bg-raised);                        
+       39 +  --color-line: var(--line);                                  
+       40 +  --color-ink: var(--ink);                                    
+       41 +  --color-ink-dim: var(--ink-dim);                            
+       42 +  --color-ink-faint: var(--ink-faint);                        
+       43 +  --color-act: var(--act);                                    
+       44 +  --color-watch: var(--watch);                                
+       45 +  --color-up: var(--up);                                      
+       46 +  --color-down: var(--down);                                  
+       47 +  --color-accent: var(--accent);                              
+       48    --font-sans: var(--font-geist-sans);
+       49    --font-mono: var(--font-geist-mono);
+       50  }
+       51  
+       15 -@media (prefers-color-scheme: dark) {                         
+       16 -  :root {                                                     
+       17 -    --background: #0a0a0a;                                    
+       18 -    --foreground: #ededed;                                    
+       19 -  }                                                           
+       52 +* {                                                           
+       53 +  -webkit-tap-highlight-color: transparent;                   
+       54  }
+       55  
+       56 +html {                                                        
+       57 +  background: var(--bg);                                      
+       58 +  /* Respect the iOS safe area so the bottom nav never sits un
+          +der the home indicator. */                                    
+       59 +  height: 100%;                                               
+       60 +}                                                             
+       61 +                                                              
+       62  body {
+       23 -  background: var(--background);                              
+       24 -  color: var(--foreground);                                   
+       25 -  font-family: Arial, Helvetica, sans-serif;                  
+       63 +  background: var(--bg);                                      
+       64 +  color: var(--ink);                                          
+       65 +  font-family: var(--font-geist-sans), ui-sans-serif, system-u
+          +i, -apple-system, sans-serif;                                 
+       66 +  font-feature-settings: "cv01", "cv03", "ss01";              
+       67 +  -webkit-font-smoothing: antialiased;                        
+       68 +  overscroll-behavior-y: none;                                
+       69  }
+       70 +                                                              
+       71 +/* Numerals should align in columns wherever we show money. */
+       72 +.tnum {                                                       
+       73 +  font-variant-numeric: tabular-nums;                         
+       74 +  font-family: var(--font-geist-mono), ui-monospace, monospace
+          +;                                                             
+       75 +}                                                             
+       76 +                                                              
+       77 +/* --- scrollbars: present but quiet -------------------------
+          +------------ */                                               
+       78 +::-webkit-scrollbar {                                         
+       79 +  width: 6px;                                                 
+       80 +  height: 6px;                                                
+       81 +}                                                             
+       82 +::-webkit-scrollbar-thumb {                                   
+       83 +  background: var(--line);                                    
+       84 +  border-radius: 99px;                                        
+       85 +}                                                             
+       86 +::-webkit-scrollbar-track {                                   
+       87 +  background: transparent;                                    
+       88 +}                                                             
+       89 +                                                              
+       90 +/* --- primitives --------------------------------------------
+          +------------- */                                              
+       91 +.card {                                                       
+       92 +  background: var(--bg-raised);                               
+       93 +  border: 1px solid var(--line-soft);                         
+       94 +  border-radius: var(--radius);                               
+       95 +}                                                             
+       96 +                                                              
+       97 +.chip {                                                       
+       98 +  display: inline-flex;                                       
+       99 +  align-items: center;                                        
+      100 +  gap: 4px;                                                   
+      101 +  padding: 2px 7px;                                           
+      102 +  border-radius: 999px;                                       
+      103 +  font-size: 10.5px;                                          
+      104 +  font-weight: 600;                                           
+      105 +  letter-spacing: 0.02em;                                     
+      106 +  text-transform: uppercase;                                  
+      107 +  border: 1px solid var(--line);                              
+      108 +  color: var(--ink-dim);                                      
+      109 +  white-space: nowrap;                                        
+      110 +}                                                             
+      111 +                                                              
+      112 +.rail {                                                       
+      113 +  width: 3px;                                                 
+      114 +  border-radius: 99px;                                        
+      115 +  flex-shrink: 0;                                             
+      116 +}                                                             
+      117 +                                                              
+      118 +/* Hide scrollbar on horizontal pill rows while keeping the sc
+          +roll. */                                                      
+      119 +.no-bar {                                                     
+      120 +  scrollbar-width: none;                                      
+      121 +}                                                             
+      122 +.no-bar::-webkit-scrollbar {                                  
+      123 +  display: none;                                              
+      124 +}                                                             
+      125 +                                                              
+      126 +@keyframes rise {                                             
+      127 +  from {                                                      
+      128 +    opacity: 0;                                               
+      129 +    transform: translateY(6px);                               
+      130 +  }                                                           
+      131 +  to {                                                        
+      132 +    opacity: 1;                                               
+      133 +    transform: none;                                          
+      134 +  }                                                           
+      135 +}                                                             
+      136 +.rise {                                                       
+      137 +  animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;  
+      138 +}                                                             
+      139 +                                                              
+      140 +@media (prefers-reduced-motion: reduce) {                     
+      141 +  .rise {                                                     
+      142 +    animation: none;                                          
+      143 +  }                                                           
+      144 +}                                                             
+
+● Write(app\layout.tsx)
+  ⎿  Added 26 lines, removed 18 lines
+       1 -import type { Metadata } from "next";                          
+       1 +import type { Metadata, Viewport } from "next";                
+       2  import { Geist, Geist_Mono } from "next/font/google";
+       3  import "./globals.css";
+       4 +import { BottomNav } from "@/components/BottomNav";            
+       5  
+       5 -const geistSans = Geist({                                      
+       6 -  variable: "--font-geist-sans",                               
+       7 -  subsets: ["latin"],                                          
+       8 -});                                                            
+       6 +const geistSans = Geist({ variable: "--font-geist-sans", subset
+         +s: ["latin"] });                                               
+       7 +const geistMono = Geist_Mono({ variable: "--font-geist-mono", s
+         +ubsets: ["latin"] });                                          
+       8  
+      10 -const geistMono = Geist_Mono({                                 
+      11 -  variable: "--font-geist-mono",                               
+      12 -  subsets: ["latin"],                                          
+      13 -});                                                            
+      14 -                                                               
+       9  export const metadata: Metadata = {
+      16 -  title: "Create Next App",                                    
+      17 -  description: "Generated by create next app",                 
+      10 +  title: "FINN",                                               
+      11 +  description: "A filtered view of your portfolio. Push what ch
+         +anged, pull what matters.",                                    
+      12 +  manifest: "/manifest.webmanifest",                           
+      13 +  appleWebApp: { capable: true, statusBarStyle: "black-transluc
+         +ent", title: "FINN" },                                         
+      14  };
+      15  
+      20 -export default function RootLayout({ children }: LayoutProps<"/
+         -">) {                                                          
+      16 +export const viewport: Viewport = {                            
+      17 +  themeColor: "#0b0d10",                                       
+      18 +  width: "device-width",                                       
+      19 +  initialScale: 1,                                             
+      20 +  viewportFit: "cover",                                        
+      21 +  maximumScale: 5,                                             
+      22 +};                                                             
+      23 +                                                               
+      24 +export default function RootLayout({ children }: { children: Re
+         +act.ReactNode }) {                                             
+      25    return (
+      22 -    <html                                                      
+      23 -      lang="en"                                                
+      24 -      className={`${geistSans.variable} ${geistMono.variable} h
+         --full antialiased`}                                            
+      25 -    >                                                          
+      26 -      <body className="min-h-full flex flex-col">{children}</bo
+         -dy>                                                            
+      26 +    <html lang="en" className={`${geistSans.variable} ${geistMo
+         +no.variable}`}>                                                
+      27 +      <body className="min-h-dvh">                             
+      28 +        {/* Mobile-first: a phone-width column that stays centr
+         +ed on larger screens                                           
+      29 +            rather than stretching into a desktop layout the br
+         +ief didn't ask for. */}                                        
+      30 +        <div className="mx-auto min-h-dvh w-full max-w-[460px] 
+         +pb-[calc(68px+env(safe-area-inset-bottom))]">                  
+      31 +          {children}                                           
+      32 +        </div>                                                 
+      33 +        <BottomNav />                                          
+      34 +      </body>                                                  
+      35      </html>
+      36    );
+      37  }
+
+● Write(components\BottomNav.tsx)
+  ⎿  Wrote 79 lines to components\BottomNav.tsx
+       1 "use client";
+       2 
+       3 import Link from "next/link";
+       4 import { usePathname } from "next/navigation";
+       5 
+       6 const TABS = [
+       7   { href: "/", label: "Brief", icon: BriefIcon },
+       8   { href: "/signals", label: "Signals", icon: SignalIcon },
+       9   { href: "/research", label: "Research", icon: ResearchIcon },
+      10 ];
+     … +86 lines (ctrl+o to expand)
+
+● Now the formatting helpers and the announcement card — the densest piece of
+  the UI.
+
+● Write(lib\format.ts)
+  ⎿  Wrote 59 lines to lib\format.ts
+       1 /** Presentation helpers. Kept tiny and dependency-free. */
+       2 
+       3 /** "4h ago", "2d ago" - relative to the corpus's own newest fil
+         ing, not wall clock. */
+       4 export function timeAgo(iso: string, now: string): string {
+       6   const m = Math.round(ms / 60_000);
+       7   if (m < 1) return "just now";
+       8   if (m < 60) return `${m}m ago`;
+       9   const h = Math.round(m / 60);
+      10   if (h < 24) return `${h}h ago`;
+     … +60 lines (ctrl+o to expand)
+
+● Write(components\FilingCard.tsx)
+  ⎿  Wrote 194 lines to components\FilingCard.tsx
+       1 "use client";
+       2 
+       3 import { useState } from "react";
+       4 import Link from "next/link";
+       5 import type { Announcement } from "@/lib/types";
+       7 import { BUCKET_COLOR, cleanFilingText, crore, deltaPct, pct, ti
+         meAgo } from "@/lib/format";
+       8 
+       9 /**
+      10  * One filing.
+     … +221 lines (ctrl+o to expand)
+
+● Now The Brief — the home screen where the triage opinion actually lands.
+
+● Write(components\Brief.tsx)
+  ⎿  Wrote 198 lines to components\Brief.tsx
+       1 "use client";
+       2 
+       3 import { useMemo, useState } from "react";
+       4 import type { Announcement } from "@/lib/types";
+       5 import { FilingCard } from "./FilingCard";
+       6 
+       7 const WINDOWS = [
+       8   { hours: 24, label: "24h" },
+       9   { hours: 72, label: "3d" },
+      10   { hours: 168, label: "7d" },
+     … +220 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Build is green. Let me start the dev server and actually look at it on a phone
+  viewport.
+
+  Called claude-in-chrome, ran 1 shell command (ctrl+o to expand)
+
+● Chrome extension isn't connected, so I'll verify by inspecting rendered output
+  instead.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The Brief renders real data, and the top item — Info Edge's MD & CEO
+  transition — is exactly right. But I can see three genuine classifier bugs.
+  Fixing them:
+
+● Update(lib\categories.ts)
+  ⎿  Added 8 lines, removed 2 lines
+      143  
+      144  /** Ordered text rules applied when `desc` is ambiguous or unm
+           apped. First match wins. */
+      145  const TEXT_RULES: Array<[RegExp, Category]> = [
+      146 -  [/(financial |unaudited |audited )?results?\b|financial stat
+          -ements?/i, "results"],                                        
+      147 -  [/transcript|audio recording|con(f(erence)?)?[ .]?call|earni
+          -ngs call/i, "earnings_call"],                                 
+      146 +  // Meetings first: "Results of Postal Ballot" is a vote outc
+          +ome, not financial results,                                   
+      147 +  // and a loose /results/ rule swallows it.                  
+      148    [/postal ballot/i, "postal_ballot"],
+      149    [/(annual|extraordinary) general meeting|\bAGM\b|\bEGM\b/i, 
+           "agm_egm"],
+      150 +  // Require financial context so only actual results filings 
+          +land here.                                                    
+      151 +  [                                                           
+      152 +    /(financial|unaudited|audited|quarterly|half[- ]year(ly)?|
+          +annual) results?|results? for the (quarter|period|year|half)|f
+          +inancial statements?|standalone and consolidated results?/i,  
+      153 +    "results",                                                
+      154 +  ],                                                          
+      155 +  [/transcript|audio recording|con(f(erence)?)?[ .]?call|earni
+          +ngs call/i, "earnings_call"],                                 
+      156    [/pledg/i, "pledging"],
+      157    [/insider trading|\bSAST\b|PIT Regulations|Regulation 7\(2\)
+           /i, "insider_trading"],
+      158    [/dividend/i, "dividend"],
+
+● Update(lib\materiality.ts)
+  ⎿  Added 5 lines
+      48  
+      49    // --- suppress ---------------------------------------------
+          --------------
+      50    { re: /audio recording/i, delta: -22, note: "audio only, tran
+          script is the signal" },
+      51 +  // Spinning up a subsidiary is corporate housekeeping, not a 
+         +deal. Without this it                                          
+      52 +  // scores like a real acquisition and crowds out the filings 
+         +that matter.                                                   
+      53 +  { re: /incorporation of (a )?(wholly[- ]owned |step[- ]down )
+         +?subsidiar/i, delta: -30, note: "subsidiary incorporation" },  
+      54 +  // The deck is useful context, but the results filing itself 
+         +is the primary source.                                         
+      55 +  { re: /investor presentation|earnings presentation/i, delta: 
+         +-14, note: "presentation, not the filing" },                   
+      56    // Share allotments are mostly ESOP/warrant housekeeping. Sup
+          press the generic case and
+      57    // let the "equity event" modifier above lift genuine QIP/rig
+          hts/preferential raises back up.
+      58    { re: /allotment of [\d,]+ (equity shares?|securities|shares?
+          )/i, delta: -24, note: "routine share allotment" },
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Postal ballots now correctly buried at 24 instead of surfacing at 88. Let me
+  dedupe repeat filings and then move to the LLM layer.
+
+● Update(lib\store.ts)
+  ⎿  Added 1 line, removed 1 line
+      47    const dc = read<{ docs: Record<string, DocLink[]> }>("docs.js
+          on", { docs: {} });
+      48    const ds = read<Record<string, Dossier>>("dossiers.json", {})
+          ;
+      49    cache = {
+      50 -    announcements: ann.announcements,                          
+      50 +    announcements: dedupe(ann.announcements),                  
+      51      generatedAt: ann.generatedAt,
+      52      prices: px.prices,
+      53      docs: dc.docs,
+
+● Update(lib\store.ts)
+  ⎿  Added 15 lines
+      37    dossiers: Record<string, Dossier>;
+      38  } | null = null;
+      39  
+      40 +/**                                                            
+      41 + * Companies routinely file the same disclosure twice (revision
+         +s, XBRL re-submissions).                                       
+      42 + * The corpus keeps both because it is the raw record; the app 
+         +shows the newest only,                                         
+      43 + * otherwise the digest reads as if something happened twice.  
+      44 + */                                                            
+      45 +function dedupe(list: Announcement[]): Announcement[] {        
+      46 +  const seen = new Map<string, Announcement>();                
+      47 +  for (const a of list) {                                      
+      48 +    const key = `${a.symbol}|${a.nseDesc}|${a.text.slice(0, 160
+         +).toLowerCase()}`;                                             
+      49 +    const prev = seen.get(key);                                
+      50 +    if (!prev || a.at > prev.at) seen.set(key, a);             
+      51 +  }                                                            
+      52 +  return [...seen.values()].sort((x, y) => y.at.localeCompare(x
+         +.at));                                                         
+      53 +}                                                              
+      54 +                                                               
+      55  function load() {
+      56    if (cache) return cache;
+      57    const ann = read<{ generatedAt: string; announcements: Announ
+          cement[] }>("announcements.json", {
+
+● Now the LLM layer. I need your Gemini key to run enrichment and build the
+  Dossier.
+
+● User answered Claude's questions:
+  ⎿  · I need a Gemini API key to run the enrichment pass and build the 
+     Promised-vs-Delivered research view. How do you want to handle it? → I'll 
+     add it to .env.local myself
+
+  Ran 2 shell commands (ctrl+o to expand)
+● Now the Signals screen — configurable thresholds, since the brief's point is
+  that the investor decides what "unusual" means.
+
+● Write(components\Signals.tsx)
+  ⎿  Wrote 227 lines to components\Signals.tsx
+      1 "use client";
+      2 
+      3 import { useEffect, useMemo, useState } from "react";
+      4 import Link from "next/link";
+      5 import type { Announcement, AlertConfig, Bar, Category } from "@/
+      6 import { DEFAULT_ALERT_CONFIG } from "@/lib/types";
+      7 import { evaluateSignals, type SignalInput } from "@/lib/signals"
+        ;
+      8 import { CATEGORY_LABEL } from "@/lib/categories";
+      9 import { timeAgo } from "@/lib/format";
+     … +246 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Signals works — RELIANCE +11.6% on 5.8× volume (the Jio Platforms IPO) is a
+  strong demo signal. Let me scope category alerts to the same lookback as
+  price/volume so the list isn't dominated by old filings.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Key is in. Let me discover the actual available Gemini models rather than
+  hardcoding remembered IDs.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Verifying paid off — newer models than I'd have assumed. Let me smoke-test the
+  tiers, including PDF input.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Critical finding: Pro is 429 (no free-tier quota) and 2.5-pro is retired. So
+  Tier 3 will be Flash with a raised thinking budget. Let me verify that and PDF
+  input work.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● PDF extraction works — real verbatim quotes from the actual transcript in 12s.
+  Now the tiered router with caching and a cost ledger.
+
+● Write(lib\gemini.ts)
+  ⎿  Wrote 202 lines to lib\gemini.ts
+       1 import { createHash } from "node:crypto";
+         om "node:fs";
+       3 import { join } from "node:path";
+       4 
+       6  * Tiered model router with a content-hash cache and a token led
+         ger.
+       8  * The brief rewards spending less for the same result, so routi
+         ng is explicit:
+       9  *
+         ll (lib/categories.ts)
+     … +220 lines (ctrl+o to expand)
+
+● Now the enrichment pass — Tier 1 batched judgements and Tier 2 results
+  extraction.
+
+● Write(worker\enrich.ts)
+  ⎿  Wrote 224 lines to worker\enrich.ts
+       1 /**
+         est`.
+       3  *
+       5  *   Tier 1  one-line "why it matters" for surfaced filings, bat
+       6  *   Tier 2  Revenue/EBITDA/PBT/PAT from results PDFs, with QoQ 
+         and YoY
+         ement changes
+       8  *
+         oint of Tier 0: you do
+         o show.
+     … +269 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Two problems. The 400 on Tier 1 is blocking everything — let me isolate it.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed: thinkingBudget: 0 is rejected by flash-lite (minimum 128). Fixing
+  that, plus the results-PDF selection.
+
+● Update(lib\gemini.ts)
+  ⎿  Added 5 lines, removed 1 line
+      147  
+      148    const ai = await getClient();
+      149    const config: Record<string, unknown> = { maxOutputTokens: o
+           .maxOutput ?? 8000 };
+      150 -  if (o.thinking !== undefined) config.thinkingConfig = { thin
+          -kingBudget: o.thinking };                                     
+      150 +  // These models reject thinkingBudget: 0 outright (400 INVAL
+          +ID_ARGUMENT); 128 is the                                      
+      151 +  // floor. Asking for "no thinking" therefore means "as littl
+          +e as the API allows".                                         
+      152 +  if (o.thinking !== undefined) {                             
+      153 +    config.thinkingConfig = { thinkingBudget: o.thinking <= 0 
+          +? 128 : o.thinking };                                         
+      154 +  }                                                           
+      155    if (o.json) config.responseMimeType = "application/json";
+      156  
+      157    for (let attempt = 0; attempt < 4; attempt++) {
+
+● Update(worker\enrich.ts)
+  ⎿  Added 15 lines, removed 1 line
+      191  async function main() {
+      192    const all = payload.announcements;
+      193    const surfaced = all.filter((a) => a.bucket !== "NOISE");
+      194 -  const results = surfaced.filter((a) => a.category === "resul
+          -ts" && a.pdf);                                                
+      194 +                                                              
+      195 +  // Not every "results" filing carries the financial statemen
+          +ts - decks, press releases                                    
+      196 +  // and board-outcome letters share the category. Send the mo
+          +del the ones most likely to                                   
+      197 +  // contain a P&L, so we do not pay to read a slide deck look
+          +ing for EBITDA.                                               
+      198 +  const results = surfaced                                    
+      199 +    .filter((a) => a.category === "results" && a.pdf)         
+      200 +    .filter((a) => !/presentation|press release|newspaper|audi
+          +o|transcript/i.test(`${a.nseDesc} ${a.text}`))                
+      201 +    .map((a) => ({                                            
+      202 +      a,                                                      
+      203 +      rank:                                                   
+      204 +        (/financial results|statement of (standalone|consolida
+          +ted)/i.test(a.text) ? 2 : 0) +                                
+      205 +        (/result/i.test(a.pdf ?? "") ? 1 : 0),                
+      206 +    }))                                                       
+      207 +    .sort((x, y) => y.rank - x.rank || y.a.at.localeCompare(x.
+          +a.at))                                                        
+      208 +    .map((x) => x.a);                                         
+      209    const mgmt = surfaced.filter((a) => a.category === "manageme
+           nt_change");
+      210  
+      211    log(`${all.length} filings total, ${surfaced.length} surface
+           d (${all.length - surfaced.length} never sent to a model)`);
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Tier 1 now works — 268 judgements for ~$0.005. Metrics coverage is thin
+  because many "results" filings are cover letters with no P&L; the model
+  correctly refuses to invent numbers. Let me improve candidate selection.
+
+● Update(worker\enrich.ts)
+  ⎿  Added 7 lines
+      114    let done = 0;
+      115    for (const a of items) {
+      116      if (!a.pdf) continue;
+      117 +    if (a.metrics) continue; // already extracted on an earlie
+          +r run                                                         
+      118      const buf = await download(a.pdf);
+      119      if (!buf) {
+      120        log(`  ${a.symbol}: results PDF unavailable, skipping me
+           trics`);
+      121        continue;
+      122      }
+      123 +    // A board-meeting cover letter is a page or two; a result
+          +s statement with a P&L is                                     
+      124 +    // not. Skipping the small ones avoids paying to read "ple
+          +ase find enclosed".                                           
+      125 +    if (buf.length < 60_000) {                                
+      126 +      log(`  ${a.symbol}: ${(buf.length / 1024).toFixed(0)}KB 
+          +PDF looks like a cover letter, skipping`);                    
+      127 +      continue;                                               
+      128 +    }                                                         
+      129      const out = await call({
+      130        model: TIER.extract,
+      131        label: `metrics-${a.id}`,
+
+  Ran 1 shell command (ctrl+o to expand)
+● Hit the free-tier quota for flash. The cache protected Tier 1 (all cached,
+  $0). Let me test whether flash-lite can handle PDF extraction — it has a
+  separate quota pool.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Notable: flash-lite was more accurate than flash here — PAT 29,550 matches
+  Reliance's own press-release headline (flash said 29,250, likely ex-minority),
+  and it returned full QoQ/YoY columns that flash omitted. Routing PDF
+  extraction down a tier.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● 13/21 results filings now carry verified metrics, RELIANCE PAT corrected to
+  29,550. Let me do plan verification step 4 — hand-check the numbers against
+  source PDFs.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Found a real correctness bug: TMCV shows EBITDA YoY +44,120% — Tata Motors
+  demerged, so the year-ago base is a near-zero stub and the comparison is
+  meaningless. Fixing delta handling.
+
+● Update(lib\format.ts)
+  ⎿  Added 11 lines
+      31    return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
+      32  }
+      33  
+      34 +/**                                                            
+      35 + * Percentage change, or null when the comparison is not meanin
+         +gful.                                                          
+      36 + *                                                             
+      37 + * Demergers and restructurings leave near-zero stubs in the pr
+         +ior-period column                                              
+      38 + * (Tata Motors' year-ago commercial-vehicle EBITDA, for instan
+         +ce), and dividing by them                                      
+      39 + * produces a headline like "+44,120%" that is arithmetically t
+         +rue and completely useless.                                    
+      40 + * A loss-to-profit swing has the same problem. In both cases w
+         +e show nothing rather than                                     
+      41 + * a number the investor would have to mentally discard.       
+      42 + */                                                            
+      43  export function deltaPct(cur: number | null, base: number | nul
+          l): number | null {
+      44    if (cur == null || base == null || base === 0) return null;
+      45 +  if (Math.sign(cur) !== Math.sign(base)) return null;         
+      46 +  if (Math.abs(base) < Math.abs(cur) * 0.02) return null;      
+      47    return ((cur - base) / Math.abs(base)) * 100;
+      48  }
+      49  
+
+● Now the signature feature — Promised vs Delivered.
+
+● Write(worker\dossier.ts)
+  ⎿  Wrote 331 lines to worker\dossier.ts
+       1 /**
+       3  *
+       4  * Builds the "promised vs delivered" ledger the brief calls out
+       5  * most: take management's own forward-looking statements from p
+         ast earnings calls, then
+       7  *
+       8  * Grounding discipline: the only inputs are the company's own c
+       9  * the figures we extracted from its own results filings. No new
+         s, no broker notes, and
+         knows about the company.
+     … +397 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Promise extraction works — 15 commitments from 3 calls. The verdict pass hit
+  the flash quota. Let me add a model fallback chain so quota exhaustion
+  degrades a tier instead of failing.
+
+● Update(lib\gemini.ts)
+  ⎿  Added 6 lines
+       98    json?: boolean;
+       99    /** Stable label for cache keys and logs. */
+      100    label: string;
+      101 +  /**                                                         
+      102 +   * Models to drop down to if the primary is rate-limited or 
+          +unavailable.                                                  
+      103 +   * Free-tier quota is per-model, so a cheaper tier is usuall
+          +y still answering when the                                    
+      104 +   * stronger one is exhausted - a degraded answer beats an em
+          +pty card.                                                     
+      105 +   */                                                         
+      106 +  fallbacks?: string[];                                       
+      107  }
+      108  
+      109  let client: any = null;
+
+● Update(lib\gemini.ts)
+  ⎿  Added 11 lines
+      137   * enrichment degrades a single card instead of killing the wh
+           ole run.
+      138   */
+      139  export async function call(o: CallOpts): Promise<string | null
+           > {
+      140 +  for (const model of [o.model, ...(o.fallbacks ?? [])]) {    
+      141 +    const text = await callOne({ ...o, model });              
+      142 +    if (text !== null) return text;                           
+      143 +    if (model !== (o.fallbacks ?? []).at(-1) && (o.fallbacks ?
+          +? []).length) {                                               
+      144 +      console.log(`  [gemini] ${o.label}: falling back from ${
+          +model}`);                                                     
+      145 +    }                                                         
+      146 +  }                                                           
+      147 +  return null;                                                
+      148 +}                                                             
+      149 +                                                              
+      150 +async function callOne(o: CallOpts): Promise<string | null> { 
+      151    mkdirSync(CACHE_DIR, { recursive: true });
+      152    const key = cacheKey(o);
+      153    const path = join(CACHE_DIR, `${key}.json`);
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Fallback worked. Let me inspect the actual output quality — this is the
+  feature the brief says it values most.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● This is working exactly as intended — real analysis, not summary. Six missed
+  commitments on battery/solar timelines with evidence quotes, six kept, three
+  correctly withheld as too_early. Now the research UI.
+
+● Write(components\PromiseLedger.tsx)
+  ⎿  Wrote 134 lines to components\PromiseLedger.tsx
+       1 "use client";
+       2 
+       3 import { useState } from "react";
+       5 
+       6 const VERDICT = {
+       7   kept: { label: "Kept", colour: "var(--up)", mark: "✓" },
+       8   partial: { label: "Partial", colour: "var(--watch)", mark: "~"
+       9   missed: { label: "Missed", colour: "var(--down)", mark: "✕" },
+      10   too_early: { label: "Open", colour: "var(--ink-faint)", mark: 
+         "·" },
+     … +150 lines (ctrl+o to expand)
+
+● Write(components\Sparkline.tsx)
+  ⎿  Wrote 60 lines to components\Sparkline.tsx
+      1 import type { Bar } from "@/lib/types";
+      2 
+      3 /**
+        s, no gridlines -
+      5  * enough to tell the investor which way the stock has been going
+         while they read
+      6  * what management promised.
+      8 export function Sparkline({ bars, height = 44 }: { bars: Bar[]; h
+        eight?: number }) {
+      9   if (bars.length < 2) return null;
+     … +60 lines (ctrl+o to expand)
+
+● Now the research index and the per-ticker dossier page.
+
+● Write(components\ResearchIndex.tsx)
+  ⎿  Wrote 117 lines to components\ResearchIndex.tsx
+       1 "use client";
+       2 
+       3 import { useMemo, useState } from "react";
+       4 import Link from "next/link";
+       5 import { useRouter } from "next/navigation";
+       6 import type { Company } from "@/lib/types";
+       7 
+       8 /**
+       9  * Entry point for pull-side research.
+      10  *
+     … +127 lines (ctrl+o to expand)
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● All three work, including the honest degraded state for an unseen ticker. Let
+  me build more dossiers in the background while I do PWA + docs.
+
+  Ran 4 shell commands (ctrl+o to expand)
+● Dossiers are building (slowly, with quota backoff). Let me write the README
+  while that runs.
+
+● Write(README.md)
+  ⎿  Added 164 lines, removed 22 lines
+        1 -This is a [Next.js](https://nextjs.org) project bootstrapped w
+          -ith [`create-next-app`](https://nextjs.org/docs/app/api-refere
+          -nce/cli/create-next-app).                                     
+        1 +# FINN                                                        
+        2  
+        3 -## Getting Started                                            
+        3 +**A filtered view of your portfolio.** Push tells you what cha
+          +nged and why you should care.                                 
+        4 +Pull audits management against their own words.               
+        5  
+        5 -First, run the development server:                            
+        6 +Built for the ENAM Holdings AI Engineer Build Challenge.      
+        7  
+        7 -```bash                                                       
+        8 -npm run dev                                                   
+        9 -# or                                                          
+       10 -yarn dev                                                      
+       11 -# or                                                          
+       12 -pnpm dev                                                      
+       13 -# or                                                          
+       14 -bun dev                                                       
+        8 +---                                                           
+        9 +                                                              
+       10 +## The opinion                                                
+       11 +                                                              
+       12 +> An investor's inbox should be a **triage queue**, not a feed
+          +.                                                             
+       13 +                                                              
+       14 +The brief says the scarce skill is not aggregating information
+          +, it's filtering it. So the                                   
+       15 +product is built around a claim most dashboards refuse to make
+          +: **most filings do not matter,                               
+       16 +and the app should say so out loud.**                         
+       17 +                                                              
+       18 +Every announcement is scored and sorted into one of three buck
+          +ets:                                                          
+       19 +                                                              
+       20 +| | |                                                         
+       21 +|---|---|                                                     
+       22 +| **Act** | Needs a decision today |                          
+       23 +| **Watch** | Relevant, read when you can |                   
+       24 +| **Buried** | Collapsed to one line: *"41 routine filings bur
+          +ied"* |                                                       
+       25 +                                                              
+       26 +Nothing is deleted. Tap any score and you see exactly which ru
+          +les fired and why — triage is a                               
+       27 +claim the investor can audit, never a black box.              
+       28 +                                                              
+       29 +## Three surfaces                                             
+       30 +                                                              
+       31 +**The Brief** (push, windowed digest) — every portfolio filing
+          + in a window you pick (24h → 30d),                            
+       32 +triaged. Results filings render Revenue / EBITDA / PBT / PAT w
+          +ith QoQ and YoY. Management changes                           
+       33 +render who is arriving and where from.                        
+       34 +                                                              
+       35 +**Signals** (push, triggered alerts) — volume above *N×* its 2
+          +0-day average, price moves beyond                             
+       36 +*±X%*, and "always alert me on these categories". You move the
+          + sliders; the list recomputes as you                          
+       37 +drag. The point is that *you* define unusual.                 
+       38 +                                                              
+       39 +**Research** (pull) — enter any NSE symbol. Grounded in annual
+          + reports and concall transcripts only.                        
+       40 +The centrepiece is the **Promised vs Delivered** ledger.      
+       41 +                                                              
+       42 +### Promised vs Delivered                                     
+       43 +                                                              
+       44 +The brief calls this "the difference between summarising manag
+          +ement and analysing them". FINN                               
+       45 +extracts every explicit forward-looking commitment from manage
+          +ment's past earnings calls, then                              
+       46 +checks each against the most recent call and the company's own
+          + reported figures.                                            
+       47 +                                                              
+       48 +Real output for RELIANCE:                                     
+       49 +                                                              
+       50  ```
+       51 +✕ MISSED   Achieve 40-GWh battery manufacturing capacity this 
+          +year     said Jul 2026                                        
+       52 +           → "cell will come sometime late next year"         
+       53 +✕ MISSED   Start supplying power from Kutch this year         
+          +         said Jul 2026                                        
+       54 +           → connectivity now guided to Q1 of next year       
+       55 +✓ KEPT     Enter Australia and African markets next quarter   
+          +         said Jul 2026                                        
+       56 +           → now in Coles and Woolworths                      
+       57 +· OPEN     Double beverage capacity during the year           
+          +         said Jan 2026                                        
+       58 +           → not addressed in the latest call                 
+       59 +```                                                           
+       60  
+       17 -Open [http://localhost:3000](http://localhost:3000) with your 
+          -browser to see the result.                                    
+       61 +Each row expands to **two verbatim quotes** — the promise, and
+          + the evidence — each linking to the                           
+       62 +source PDF. `OPEN` is returned whenever the documents do not a
+          +ctually settle the question; the                              
+       63 +prompt is explicit that guessing is worse than abstaining.    
+       64  
+       19 -You can start editing the page by modifying `app/page.tsx`. Th
+          -e page auto-updates as you edit the file.                     
+       65 +---                                                           
+       66  
+       21 -This project uses [`next/font`](https://nextjs.org/docs/app/bu
+          -ilding-your-application/optimizing/fonts) to automatically opt
+          -imize and load [Geist](https://vercel.com/font), a new font fa
+          -mily for Vercel.                                              
+       67 +## Architecture                                               
+       68  
+       23 -## Learn More                                                 
+       69 +```                                                           
+       70 +worker/   (runs on a residential IP or GitHub Actions — never 
+          +on Vercel)                                                    
+       71 +  sources.ts   NSE announcements · Yahoo EOD · screener.in doc
+          +s                                                             
+       72 +  run.ts       ingest → data/corpus/*.json        (Tier 0: rul
+          +es only, zero tokens)                                         
+       73 +  rescore.ts   re-triage offline without refetching 23MB      
+       74 +  enrich.ts    Tier 1 + Tier 2 LLM passes                     
+       75 +  dossier.ts   Tier 2 + Tier 3, the promised-vs-delivered ledg
+          +er                                                            
+       76 +                              │                               
+       77 +                     data/corpus/*.json  ──▶  Next.js on Verce
+          +l                                                             
+       78 +                       (committed, 824KB)       (reads the cor
+          +pus; never scrapes)                                           
+       79 +```                                                           
+       80  
+       25 -To learn more about Next.js, take a look at the following reso
+          -urces:                                                        
+       81 +**Ingestion and serving are decoupled on purpose.** NSE and sc
+          +reener.in throttle datacenter                                 
+       82 +traffic, so a deployed app that scrapes on request is a demo t
+          +hat dies in the room. The corpus is                           
+       83 +committed, so a fresh clone runs with no API key and no networ
+          +k.                                                            
+       84  
+       27 -- [Next.js Documentation](https://nextjs.org/docs) - learn abo
+          -ut Next.js features and API.                                  
+       28 -- [Learn Next.js](https://nextjs.org/learn) - an interactive N
+          -ext.js tutorial.                                              
+       85 +### Data sources                                              
+       86  
+       30 -You can check out [the Next.js GitHub repository](https://gith
+          -ub.com/vercel/next.js) - your feedback and contributions are w
+          -elcome!                                                       
+       87 +| Source | What | Note |                                      
+       88 +|---|---|---|                                                 
+       89 +| `nseindia.com/api/corporate-announcements` | filings | Date-
+          +ranged, all equities in **one call** — 7,500 filings across 1,
+          +780 symbols. Adding a holding costs zero extra requests. |    
+       90 +| `query1.finance.yahoo.com/v8/finance/chart` | EOD price + vo
+          +lume | Plain JSON, no key, no `yfinance` |                    
+       91 +| `screener.in/company/{SYM}` | annual reports, concall transc
+          +ripts | We follow its links to the issuer's own PDFs, never it
+          +s commentary |                                                
+       92  
+       32 -## Deploy on Vercel                                           
+       93 +Gemini reads PDFs natively, which deleted the entire `pdfplumb
+          +er`/OCR layer. Combined with every                            
+       94 +source being plain HTTP, there was no reason to run Python — t
+          +he whole repo is one TypeScript                               
+       95 +toolchain and one `npm install`.                              
+       96  
+       34 -The easiest way to deploy your Next.js app is to use the [Verc
+          -el Platform](https://vercel.com/new?utm_medium=default-templat
+          -e&filter=next.js&utm_source=create-next-app&utm_campaign=creat
+          -e-next-app-readme) from the creators of Next.js.              
+       97 +### Model routing                                             
+       98  
+       36 -Check out our [Next.js deployment documentation](https://nextj
+          -s.org/docs/app/building-your-application/deploying) for more d
+          -etails.                                                       
+       99 +The brief rewards spending less for the same result, so routin
+          +g is explicit and measured:                                   
+      100 +                                                              
+      101 +| Tier | Model | Job | Volume |                               
+      102 +|---|---|---|---|                                             
+      103 +| **0** | *none — rules* | NSE's 105-value taxonomy → the 17 r
+          +eference categories, + triage scoring | **170 of 438 filings n
+          +ever reach a model** |                                        
+      104 +| **1** | `flash-lite` | One-line "why it matters", batched 25
+          +/call | 268 filings in 11 calls |                             
+      105 +| **2** | `flash-lite` | Results PDF → Revenue/EBITDA/PBT/PAT;
+          + executive backgrounds | 13 filings |                         
+      106 +| **3** | `flash` + 8k thinking | Promised-vs-delivered adjudi
+          +cation, once per company | ~1 call/company |                  
+      107 +                                                              
+      108 +Plus a **content-hash cache** (`sha256` of model + prompt + in
+          +put bytes) so re-runs cost nothing —                          
+      109 +re-running `enrich` after a prompt-unchanged edit is **$0.00**
+          +.                                                             
+      110 +                                                              
+      111 +Live measurements are written to [`data/cost-report.json`](dat
+          +a/cost-report.json) on every run.                             
+      112 +A full enrichment of 438 filings costs roughly **$0.03 notiona
+          +l** — and **$0.00 actual**, because                           
+      113 +it fits inside the free tier.                                 
+      114 +                                                              
+      115 +**Three routing decisions worth naming:**                     
+      116 +                                                              
+      117 +1. **Tier 3 was meant to be Pro.** Every Pro model returns 429
+          + on the free tier, so Tier 3 is Flash                         
+      118 +   with a raised thinking budget. That is the honest version o
+          +f "pick the right tool" when the best                         
+      119 +   tool isn't on the menu.                                    
+      120 +2. **PDF extraction was demoted from `flash` to `flash-lite` o
+          +n evidence, not vibes.** On a                                 
+      121 +   benchmark filing, flash-lite returned Reliance's PAT as ₹29
+          +,550cr — matching the company's own                           
+      122 +   press release — where flash returned ₹29,250cr, and flash-l
+          +ite also filled the QoQ and YoY                               
+      123 +   columns flash left empty. Cheaper *and* better, so it won. 
+      124 +3. **Quota exhaustion falls back a tier** rather than failing.
+          + A degraded answer beats an empty card.                       
+      125 +                                                              
+      126 +### Grounding discipline                                      
+      127 +                                                              
+      128 +The pull side touches primary sources only — the company's own
+          + transcripts and its own reported                             
+      129 +figures. No news, no broker notes, and the prompts forbid the 
+          +model from drawing on what it knows                           
+      130 +about the company from elsewhere. Every generated claim carrie
+          +s a citation that opens the source                            
+      131 +PDF. Where a dossier cannot be grounded, the app says so inste
+          +ad of inventing one.                                          
+      132 +                                                              
+      133 +(Push-side enrichment — an incoming executive's professional b
+          +ackground — uses outside knowledge,                           
+      134 +which the brief explicitly permits.)                          
+      135 +                                                              
+      136 +---                                                           
+      137 +                                                              
+      138 +## Running it                                                 
+      139 +                                                              
+      140 +```bash                                                       
+      141 +npm install                                                   
+      142 +npm run dev              # works immediately — corpus is commi
+          +tted, no key needed                                           
+      143 +```                                                           
+      144 +                                                              
+      145 +To rebuild the data (needs a residential IP for NSE/screener):
+      146 +                                                              
+      147 +```bash                                                       
+      148 +npm run ingest                      # Tier 0 — rules only, no 
+          +API key, no cost                                              
+      149 +npm run rescore                     # re-triage offline after 
+          +tuning rules                                                  
+      150 +cp .env.example .env.local          # add a free key: aistudio
+          +.google.com/apikey                                            
+      151 +npm run enrich                      # Tiers 1–2               
+      152 +npm run dossier -- RELIANCE DIXON   # Tier 3                  
+      153 +```                                                           
+      154 +                                                              
+      155 +---                                                           
+      156 +                                                              
+      157 +## What I deliberately left out                               
+      158 +                                                              
+      159 +- **Supabase.** The plan called for Postgres; stage 0 writes a
+          + committed JSON corpus instead.                               
+      160 +  824KB, zero provisioning, and the deploy cannot fail because
+          + a scrape failed. `lib/store.ts` is                           
+      161 +  the single swap point.                                      
+      162 +- **Six of the eight pull views.** Balance sheet, cash quality
+          +, trajectory and guidance are not                             
+      163 +  built. Thin-but-working beats broad-but-broken, and Promised
+          +-vs-Delivered is the one the brief                            
+      164 +  says it values most.                                        
+      165 +- **Live scraping from the deployed app.** `/research/<unknown
+          +>` degrades honestly rather than                              
+      166 +  attempting a fetch that datacenter IPs usually lose.        
+      167 +- **Annual reports as model input.** Transcripts are ~500KB an
+          +d carry the guidance; annual reports                          
+      168 +  are 10–30MB and mostly wouldn't change a verdict. They're li
+          +nked, not parsed.                                             
+      169 +- **Push notifications.** "Push" here means the app surfaces t
+          +hings unasked, not OS notifications.                          
+      170 +                                                              
+      171 +## Where I'd take it next                                     
+      172 +                                                              
+      173 +1. **Per-company guidance tracking over time** — the ledger cu
+          +rrently compares against the latest                           
+      174 +   call. Compounding it across every call would show whether a
+          + management team *systematically*                             
+      175 +   slips timelines, which is a far stronger signal than any si
+          +ngle miss.                                                    
+      176 +2. **Move triage weights into the UI.** The scoring table is t
+          +he product's opinion; an investor                             
+      177 +   should be able to disagree with it and have the app learn f
+          +rom what they actually open.                                  
+      178 +3. **Postgres + a nightly GitHub Action**, so the corpus refre
+          +shes without anyone's laptop.                                 
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Let me set up the repo while dossiers build.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● No leaks, 1.3MB. But .env.example isn't staged — the negation isn't taking.
+  Let me check.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● .env.example never actually got written. Recreating it and committing.
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● Neither gh nor vercel CLI is installed — both need your credentials anyway.
+  Let me finish verification while dossiers build, then hand you the deploy
+  step.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The cost report only reflects the last run — misleading. Let me make the
+  ledger cumulative across runs.
+
+● Update(lib\gemini.ts)
+  ⎿  Added 48 lines, removed 5 lines
+      64    ledger.set(model, e);
+      65  }
+      66  
+      67 -export function writeLedger() {                                
+      68 -  const rows = [...ledger.values()];                           
+      69 -  const total = rows.reduce(                                   
+      67 +const sum = (rows: LedgerEntry[]) =>                           
+      68 +  rows.reduce(                                                 
+      69      (a, r) => ({
+      70        calls: a.calls + r.calls,
+      71        cached: a.cached + r.cached,
+     ...
+       76      }),
+       77      { calls: 0, cached: 0, inTokens: 0, outTokens: 0, thinkTok
+           ens: 0, usd: 0 },
+       78    );
+       80 -  const payload = { generatedAt: new Date().toISOString(), byM
+          -odel: rows, total };                                          
+       79 +                                                              
+       80 +/**                                                           
+       81 + * Write the ledger, accumulating across runs.                
+       82 + *                                                            
+       83 + * A single run's numbers understate what the pipeline actuall
+          +y cost to build, since most                                   
+       84 + * calls are served from cache on later runs. The cumulative b
+          +lock is the honest figure to                                  
+       85 + * quote; `lastRun` shows the marginal cost of running it agai
+          +n.                                                            
+       86 + */                                                           
+       87 +export function writeLedger() {                               
+       88 +  const rows = [...ledger.values()];                          
+       89 +  const lastRun = sum(rows);                                  
+       90 +                                                              
+       91 +  let prior: Record<string, LedgerEntry> = {};                
+       92 +  let runs = 0;                                               
+       93 +  try {                                                       
+       94 +    const old = JSON.parse(readFileSync(LEDGER, "utf8"));     
+       95 +    runs = old.runs ?? 0;                                     
+       96 +    for (const r of old.cumulative?.byModel ?? []) prior[r.mod
+          +el] = r;                                                      
+       97 +  } catch {                                                   
+       98 +    /* first run */                                           
+       99 +  }                                                           
+      100 +                                                              
+      101 +  for (const r of rows) {                                     
+      102 +    const p = prior[r.model];                                 
+      103 +    prior[r.model] = p                                        
+      104 +      ? {                                                     
+      105 +          model: r.model,                                     
+      106 +          calls: p.calls + r.calls,                           
+      107 +          cached: p.cached + r.cached,                        
+      108 +          inTokens: p.inTokens + r.inTokens,                  
+      109 +          outTokens: p.outTokens + r.outTokens,               
+      110 +          thinkTokens: p.thinkTokens + r.thinkTokens,         
+      111 +          usd: p.usd + r.usd,                                 
+      112 +        }                                                     
+      113 +      : { ...r };                                             
+      114 +  }                                                           
+      115 +                                                              
+      116 +  const cumulativeRows = Object.values(prior);                
+      117 +  const payload = {                                           
+      118 +    generatedAt: new Date().toISOString(),                    
+      119 +    runs: runs + 1,                                           
+      120 +    note: "usd is notional at published list rates; actual spe
+          +nd on the free tier is $0.00",                                
+      121 +    lastRun: { byModel: rows, total: lastRun },               
+      122 +    cumulative: { byModel: cumulativeRows, total: sum(cumulati
+          +veRows) },                                                    
+      123 +  };                                                          
+      124    writeFileSync(LEDGER, JSON.stringify(payload, null, 2));
+       82 -  return payload;                                             
+      125 +  return { byModel: rows, total: lastRun, cumulative: sum(cumu
+          +lativeRows) };                                                
+      126  }
+      127  
+      128  export function ledgerSnapshot() {
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Let me run a clean production build before handing over the deploy step.
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● Most are in .scratch/ (untracked). Let me fix the real ones in committed code
+  and scope eslint.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Let me fix the remaining lint issues and a stale comment claiming 75% when the
+  real figure is 39%.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now the setState-in-effect warning — I'll restructure the localStorage read
+  properly rather than suppress it.
+
+● Update(components\Signals.tsx)
+  ⎿  Added 12 lines, removed 17 lines
+      29    announcements: Announcement[];
+      30    now: string;
+      31  }) {
+      32 -  const [config, setConfig] = useState<AlertConfig>(DEFAULT_ALE
+         -RT_CONFIG);                                                    
+      33 -  const [loaded, setLoaded] = useState(false);                 
+      32 +  // Saved thresholds are read through useSyncExternalStore rat
+         +her than an effect, so the                                     
+      33 +  // server and the first client render agree on the defaults a
+         +nd the stored value is                                         
+      34 +  // applied in the same commit - no flash of default sliders, 
+         +no cascading render.                                           
+      35 +  const stored = useSyncExternalStore(subscribe, readStored, re
+         +adServer);                                                     
+      36 +  const [override, setOverride] = useState<AlertConfig | null>(
+         +null);                                                         
+      37 +  const config = override ?? stored;                           
+      38  
+      35 -  useEffect(() => {                                            
+      39 +  const setConfig = (next: AlertConfig | ((p: AlertConfig) => A
+         +lertConfig)) => {                                              
+      40 +    const value = typeof next === "function" ? next(config) : n
+         +ext;                                                           
+      41 +    setOverride(value);                                        
+      42      try {
+      37 -      const raw = localStorage.getItem(KEY);                   
+      38 -      if (raw) setConfig({ ...DEFAULT_ALERT_CONFIG, ...JSON.par
+         -se(raw) });                                                    
+      43 +      localStorage.setItem(KEY, JSON.stringify(value));        
+      44      } catch {
+      40 -      /* private mode or blocked storage - defaults are fine */
+      45 +      /* private mode or blocked storage - the session still wo
+         +rks, it just won't persist */                                  
+      46      }
+      42 -    setLoaded(true);                                           
+      43 -  }, []);                                                      
+      47 +  };                                                           
+      48  
+      45 -  useEffect(() => {                                            
+      46 -    if (!loaded) return;                                       
+      47 -    try {                                                      
+      48 -      localStorage.setItem(KEY, JSON.stringify(config));       
+      49 -    } catch {                                                  
+      50 -      /* ignore */                                             
+      51 -    }                                                          
+      52 -  }, [config, loaded]);                                        
+      53 -                                                               
+      49    const signals = useMemo(
+      50      () => evaluateSignals(series, announcements, config, 10),
+      51      [series, announcements, config],
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Lint and typecheck both clean. Let me rebuild and re-verify the pages.
+
+  Ran 2 shell commands (ctrl+o to expand)
+● KPITTECH shows all 15 as "open" — that's a silent failure masquerading as a
+  result. Let me check.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● False alarm — KPITTECH's verdicts did come through via fallback; its guidance
+  is genuinely all FY27/FY29 targets that haven't matured yet. But the
+  silent-null path is still a real hazard, so let me close it.
+
+● Update(worker\dossier.ts)
+  ⎿  Added 4 lines
+      259    const snap = await snapshot(sym, latest);
+      260    const verdicts = await adjudicate(sym, collected, latest, me
+           tricsFor(sym));
+      261  
+      262 +  // If adjudication never ran, every row would silently fall 
+          +back to "open" and the                                        
+      263 +  // ledger would look adjudicated when it is not. Say so inst
+          +ead.                                                          
+      264 +  const adjudicationFailed = verdicts === null;               
+      265 +                                                              
+      266    const promises: Promise_[] = collected.map((p, i) => {
+      267      const v = verdicts?.find((x) => x.i === i);
+      268      const evidence: Citation[] = [];
+
+● Update(worker\dossier.ts)
+  ⎿  Added 3 lines
+      286  
+      287    return {
+      288      ...base,
+      289 +    degraded: adjudicationFailed                              
+      290 +      ? `Extracted ${promises.length} commitments for ${sym}, 
+          +but the adjudication pass could not run (model unavailable). V
+          +erdicts below are not graded.`                                
+      291 +      : undefined,                                            
+      292      snapshot: snap
+      293        ? {
+      294            business: snap.business,
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 6 dossiers, 80 commitments adjudicated. Let me commit and sort out deployment
+  — that part needs your accounts.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● FINN is built and committed. The remaining steps need your accounts.
+
+● User answered Claude's questions:
+  ⎿  · GitHub and Vercel both need your login, and neither CLI is installed. How
+     do you want to handle the repo + deploy? → I'll run the commands 
+     (Recommended)
+     · Dossiers currently cover 6 companies (80 commitments). Free-tier quota is
+     throttling further runs. Want more before you submit? → 6 is enough for 
+     the demo
+
+● Background command "Build dossiers for six more companies" completed (exit
+code 0)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 7 dossiers done — 91 commitments. Let me check the final cumulative ledger
+  and align the README numbers.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The ledger file predates my cumulative patch (that run started earlier). Let
+  me make cache entries carry usage so the total is reconstructible, and align
+  the README to measured reality.
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● Now the covering note and deploy steps.
+
+● Write(SUBMISSION.md)
+  ⎿  Wrote 135 lines to SUBMISSION.md
+       1 # Submission
+       2 
+       3 **To:** assessment@enam.com
+       4 **Subject:** `ENAM - IIT screening - 2027`
+       5 
+       6 Fill the three bracketed links before sending.
+       7 
+       8 ---
+       9 
+      10 ## Covering note (paste into the email body)
+     … +179 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Build green, lint clean, all committed. Let me close out the plan's
+  verification list — the grounding audit is the one that actually matters for
+  the core claim.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 21/21 quotes verified verbatim in their cited PDFs. That's objective proof of
+  the grounding claim — worth shipping as a repeatable check rather than leaving
+  in scratch.
+
+● Write(worker\audit.ts)
+  ⎿  Wrote 110 lines to worker\audit.ts
+       1 /**
+       3  *
+       4  * The product's central claim is that nothing in a dossier is i
+         nvented: every promise and
+         urce. This script checks
+       6  * that claim mechanically - it re-extracts the text of each cit
+       7  * quote actually appears in it.
+       8  *
+       9  * A claim you cannot verify is a claim you should not ship, so 
+      10  * Exits non-zero if any quote fails to resolve.
+     … +119 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The audit caught real fabrications — 5 ASIANPAINT "evidence" quotes don't
+  exist in the cited transcript. Let me look before deciding how to handle them.
+
+  Ran 1 shell command (ctrl+o to expand)
+● The failing quotes are investor-deck phrasings the model confabulated into
+  quote form; the genuinely spoken ones all verify. This is exactly the slop the
+  brief warns about, so let me enforce verification structurally rather than
+  just reporting it.
+
+● Write(worker\quotes.ts)
+  ⎿  Wrote 92 lines to worker\quotes.ts
+       1 /**
+       3  *
+       4  * Asking a model not to fabricate quotes is a request. Checking
+       5  * source document is an invariant. This module is the invariant
+         : a quote that does not
+       7  *
+       8  * It catches a real failure mode - models paraphrase a document
+       9  * quote-shaped sentences that were never spoken. The numbers ar
+         e often right; the
+         basis of the product's
+     … +99 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now let me fix the already-built dossiers offline (no new LLM calls) and
+  re-audit.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now let me surface that honestly in the UI and re-run the audit.
+
+● Update(components\PromiseLedger.tsx)
+  ⎿  Added 6 lines
+       99            {p.evidence.map((e, i) => (
+      100              <Quote key={i} label={`Evidence · ${e.doc}`} text=
+           {e.quote ?? ""} url={e.url} />
+      101            ))}
+      102 +          {p.evidenceVerified === false && (                  
+      103 +            <p className="mt-2 text-[11px] leading-[1.5]" styl
+          +e={{ color: "var(--ink-faint)" }}>                            
+      104 +              This verdict comes from the latest call, but the
+          + supporting quote did not appear                              
+      105 +              verbatim in it and was discarded. Read the trans
+          +cript before relying on it.                                   
+      106 +            </p>                                              
+      107 +          )}                                                  
+      108          </div>
+      109        )}
+      110      </article>
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● My edit broke it — let me rewrite audit.ts cleanly on the shared verifier.
+
+● Write(worker\audit.ts)
+  ⎿  Added 17 lines, removed 67 lines
+       2   * Grounding audit. Run with `npm run audit`.
+       3   *
+       4   * The product's central claim is that nothing in a dossier is 
+          invented: every promise and
+       5 - * every piece of evidence is a verbatim quote from a primary s
+         -ource. This script checks                                      
+       6 - * that claim mechanically - it re-extracts the text of each ci
+         -ted PDF and asserts the                                        
+       7 - * quote actually appears in it.                               
+       5 + * every piece of evidence is a verbatim quote from a primary s
+         +ource. This script re-reads                                    
+       6 + * each cited PDF and asserts the quote actually appears in it.
+       7   *
+       9 - * A claim you cannot verify is a claim you should not ship, so
+         - this is a test, not a demo.                                   
+      10 - * Exits non-zero if any quote fails to resolve.               
+       8 + * `worker/dossier.ts` applies the same check at build time, so
+         + this is the regression                                        
+       9 + * test for that invariant rather than the only line of defence
+         +. It exits non-zero on any                                     
+      10 + * failure, which is what makes it a test and not a dashboard. 
+      11   */
+      12  import { readFileSync } from "node:fs";
+      13  import { join } from "node:path";
+      14  import type { Dossier } from "../lib/types";
+      15 +import { checkQuote } from "./quotes";                         
+      16  
+      16 -const PDF_CACHE = join(process.cwd(), ".cache", "pdf");        
+      17 -const UA =                                                     
+      18 -  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+         - (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";          
+      19 -                                                               
+      17  const log = (...a: unknown[]) => console.log("[audit]", ...a);
+      18  
+      22 -/** Strip punctuation and collapse whitespace so PDF line break
+         -s do not cause false misses. */                                
+      23 -const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+
+         -/g, " ").replace(/\s+/g, " ").trim();                          
+      24 -                                                               
+      25 -async function getPdf(url: string): Promise<Buffer | null> {   
+      26 -  const path = join(PDF_CACHE, createHash("sha256").update(url)
+         -.digest("hex").slice(0, 24) + ".pdf");                         
+      27 -  if (existsSync(path)) return readFileSync(path);             
+      28 -  try {                                                        
+      29 -    const res = await fetch(url, {                             
+      30 -      headers: { "User-Agent": UA, Referer: "https://www.bseind
+         -ia.com/" },                                                    
+      31 -      signal: AbortSignal.timeout(90_000),                     
+      32 -    });                                                        
+      33 -    if (!res.ok) return null;                                  
+      34 -    const buf = Buffer.from(await res.arrayBuffer());          
+      35 -    return buf.subarray(0, 4).toString() === "%PDF" ? buf : nul
+         -l;                                                             
+      36 -  } catch {                                                    
+      37 -    return null;                                               
+      38 -  }                                                            
+      39 -}                                                              
+      40 -                                                               
+      19  async function main() {
+      20    const dossiers: Record<string, Dossier> = JSON.parse(
+      21      readFileSync(join(process.cwd(), "data", "corpus", "dossier
+          s.json"), "utf8"),
+      22    );
+      45 -  const { extractText, getDocumentProxy } = await import("unpdf
+         -");                                                            
+      23  
+      47 -  // pdf.js is noisy about font tables in exchange-filed PDFs; 
+         -none of it is actionable.                                      
+      48 -  const realWarn = console.warn;                               
+      49 -  console.warn = () => {};                                     
+      50 -                                                               
+      51 -  const text = new Map<string, string>();                      
+      52 -  let checked = 0;                                             
+      24    let verified = 0;
+      25    let unreadable = 0;
+      26    const failures: string[] = [];
+      27  
+      28    for (const [symbol, d] of Object.entries(dossiers)) {
+      29      for (const p of d.promises) {
+      59 -      for (const [quote, url, kind] of [                       
+      60 -        [p.quote, p.source.url, "promise"] as const,           
+      61 -        ...p.evidence.map((e) => [e.quote ?? "", e.url, "eviden
+         -ce"] as const),                                                
+      62 -      ]) {                                                     
+      63 -        if (!quote || !url) continue;                          
+      64 -                                                               
+      65 -        if (!text.has(url)) {                                  
+      66 -          const buf = await getPdf(url);                       
+      67 -          if (!buf) {                                          
+      68 -            text.set(url, "");                                 
+      69 -          } else {                                             
+      70 -            const doc = await getDocumentProxy(new Uint8Array(b
+         -uf));                                                          
+      71 -            const { text: t } = await extractText(doc, { mergeP
+         -ages: true });                                                 
+      72 -            text.set(url, norm(String(t)));                    
+      73 -          }                                                    
+      74 -        }                                                      
+      75 -                                                               
+      76 -        const hay = text.get(url)!;                            
+      77 -        if (!hay) {                                            
+      78 -          unreadable++;                                        
+      79 -          continue;                                            
+      80 -        }                                                      
+      81 -                                                               
+      82 -        checked++;                                             
+      83 -        // Match on a distinctive interior window rather than t
+         -he whole quote, so a                                           
+      84 -        // trimmed first or last word does not read as a fabric
+         -ation.                                                         
+      85 -        const words = norm(quote).split(" ").filter(Boolean);  
+      86 -        const probe = words.slice(2, 10).join(" ");            
+      87 -        if (probe && hay.includes(probe)) verified++;          
+      30 +      const claims: Array<[string, string | null, string]> = [ 
+      31 +        [p.quote, p.source.url, "promise"],                    
+      32 +        ...p.evidence.map((e) => [e.quote ?? "", e.url, "eviden
+         +ce"] as [string, string | null, string]),                      
+      33 +      ];                                                       
+      34 +      for (const [quote, url, kind] of claims) {               
+      35 +        if (!quote) continue;                                  
+      36 +        const status = await checkQuote(quote, url);           
+      37 +        if (status === "verified") verified++;                 
+      38 +        else if (status === "unreadable") unreadable++;        
+      39          else failures.push(`${symbol} (${kind}): "${quote.slice
+          (0, 80)}"`);
+      40        }
+      41      }
+      42    }
+      43  
+      93 -  console.warn = realWarn;                                     
+      94 -                                                               
+      44 +  const checked = verified + failures.length;                  
+      45    log(`${verified}/${checked} quotes verified verbatim in their
+           cited PDF`);
+      96 -  if (unreadable) log(`${unreadable} quotes skipped - source PD
+         -F could not be fetched or parsed`);                            
+      46 +  if (unreadable) log(`${unreadable} skipped - source PDF could
+         + not be fetched or parsed`);                                   
+      47  
+      48    if (failures.length) {
+      49      log(`FAILED - ${failures.length} quote(s) do not appear in 
+          the document they cite:`);
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 143/143 quotes now verify verbatim. Let me add the audit to the README,
+  rebuild, and commit.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Let me close the last verification item — cold start with no API key.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● FINN is built, verified, and committed. Here's where it stands.
+
+  What's there
+
+  Three mobile-first surfaces in Mentee-Selection-Mailer/FINN, built on a
+  committed 954KB corpus of 438 real NSE filings across 18 holdings:
+
+  - The Brief — filings triaged into Act / Watch / Buried, 39% buried behind one
+    auditable line. Tap any score to see which rules fired.
+  - Signals — volume/price/category thresholds you drag; recomputes live.
+  - Research — 7 pre-built dossiers, 91 adjudicated commitments.
+
+  The Promised-vs-Delivered ledger is the piece worth showing: Reliance comes
+  out 6 kept / 6 missed, with the battery and solar timelines it committed to in
+  Jan and Jul 2026 all slipped to "late next year" — in management's own quoted
+  words.
+
+  Three things the build caught that are worth knowing
+
+  Ticker drift is silent. Validating symbols against both NSE and Yahoo before
+  committing the portfolio caught that ZOMATO is now ETERNAL and TATAMOTORS has
+  split into TMCV/TMPV. Either would have produced a confidently empty
+  dashboard.
+
+  flash-lite beat flash at PDF extraction. On a benchmark filing it returned
+  Reliance's PAT as ₹29,550cr — matching the company's own press release — where
+  flash said ₹29,250cr and left QoQ/YoY empty. So extraction got demoted a tier
+  on evidence. Whole corpus cost 57 live calls, ~$0.09 notional, $0.00 actual.
+
+  The grounding audit found real fabrication. First run came back 143/148: five
+  Asian Paints "evidence" quotes were investor-deck phrasings the model had
+  reshaped into quote form — right numbers, invented quotation marks. npm run 
+  audit now enforces this at build time and as a non-zero-exit test. It passes
+  143/143.
+
+  That last one changed the architecture: quote verification moved from a prompt
+  instruction to an enforced invariant in worker/quotes.ts.
+
+  Two things I could not verify
+
+  - Real-phone rendering. The Chrome extension isn't connected, so I verified
+    markup and routes but never saw it on glass. The brief says "mobile-first"
+    four times — please open the deployed URL on an actual phone before sending.
+  - Hand-checking every extracted number. I verified Reliance against its press
+    release; the other 12 results filings I checked only for plausibility and
+    arithmetic.
+
+  Your turn — deploy
+
+  cd FINN
+  # create an empty repo at https://github.com/new named `finn` (no README), 
+  then:
+  git remote add origin https://github.com/<YOUR-USERNAME>/finn.git
+  git branch -M main && git push -u origin main
+  npx -y vercel@latest --prod        # browser login once; no env vars needed
+
+  Run these with the ! prefix in this session so the output lands here and I can
+  fix anything that breaks.
+
+  SUBMISSION.md has the full covering note ready to paste, with the three
+  bracketed links to fill and the assessment@enam.com / ENAM - IIT screening - 
+  2027 details. Note it opens by acknowledging the Nov 1 deadline has passed —
+  worth a look before you send.
+
+✻ Churned for 1h 6m 10s · done 3:34 PM
+
+※ recap: Goal: ship FINN for the ENAM challenge. The app is built, verified, and committed locally; everything's done except deployment. Next: run the GitHub push and `npx vercel --prod` commands from SUBMISSION.md, ideally with the `!` prefix here. (disable recaps in /config)
+
+! cd FINN                                                                       
+  ⎿  /usr/bin/bash: line 1: cd: FINN: No such file or directory
+
+  ⎿  Interrupted · What should Claude do instead?
+
+※ recap: FINN, your ENAM build-challenge app, is finished and committed locally: three mobile surfaces over 438 real NSE filings, grounding audit passing 143/143. Next, push to GitHub and deploy to Vercel using the commands in SUBMISSION.md. (disable recaps in /config)
+
+❯ PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> git remote   
+  add origin https://github.com/shivammeena23/FINN.git                          
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> git branch   
+  -M main                                                                       
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> git push -u  
+  origin main                                                                   
+  remote: Permission to shivammeena23/FINN.git denied to Shuyanokoji7.          
+  fatal: unable to access 'https://github.com/shivammeena23/FINN.git/': The     
+  requested URL returned error: 403                                             
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> git login    
+  git: 'login' is not a git command. See 'git --help'.                          
+                                                                                
+  The most similar command is                                                   
+          column                                                                
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> gh auth      
+  login                                                                         
+  gh : The term 'gh' is not recognized as the name of a cmdlet, function,       
+  script file, or operable program. Check the spelling of the name, or if a     
+  path was                                                                      
+  included, verify that the path is correct and try again.                      
+  At line:1 char:1                                                              
+  - gh auth login                                                               
+  - ~~                                                                          
+    - CategoryInfo          : ObjectNotFound: (gh:String) [],                   
+  CommandNotFoundException                                                      
+    - FullyQualifiedErrorId : CommandNotFoundException                          
+                                                                                
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN>              
+
+● Credential mismatch: git is authenticating as Shuyanokoji7 but the repo is
+  under shivammeena23. Let me diagnose.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Clear picture: Windows Credential Manager has Shuyanokoji7 stored for
+  github.com, but the remote points at shivammeena23/FINN — a different account,
+  hence the 403.
+
+● User answered Claude's questions:
+  ⎿  · Which GitHub account should host the FINN repo? This link goes to ENAM, 
+     so it's worth getting right. → shivammeena23 (the repo you already made)
+     · Your commits are authored as Shuyanokoji7 <bhavya0525@gmail.com>, but 
+     this session's email is annquoteofficial@gmail.com. Change the authorship 
+     before pushing? → Rewrite to match the GitHub account
+
+● Rewriting authorship on all four commits (nothing is pushed, so this is safe),
+  and setting the local identity for future commits.
+
+  Ran 1 shell command (ctrl+o to expand)
+● Authorship rewritten with original dates and the Claude co-author trailers
+  intact. Let me verify the tree survived the rewrite.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Repo is intact — 48 files, clean tree, no key leaked. Now the credential,
+  which is the actual blocker.
+
+  Run this to clear the cached Shuyanokoji7 credential, then push:
+
+  cmdkey /delete:LegacyGeneric:target=git:https://github.com
+  cmdkey /delete:"LegacyGeneric:target=GitHub - 
+  https://api.github.com/Shuyanokoji7"
+  git push -u origin main
+
+  The push will pop a browser window — sign in as shivammeena23 there.
+
+  Two things to know before you run it:
+
+  - This signs git out of GitHub for all your repos, not just this one. Any
+    other repo you push as Shuyanokoji7 will prompt you to sign in again. That's
+    recoverable, just mildly annoying.
+  - I deliberately didn't run these myself — clearing your stored credentials
+    has effects outside this project, so it should be your call.
+
+  If you'd rather not clear credentials, try this first — it sometimes makes
+  Credential Manager prompt for the right account without wiping anything:
+
+  git remote set-url origin
+  https://shivammeena23@github.com/shivammeena23/FINN.git
+  git push -u origin main
+
+  Also confirm github.com/shivammeena23/FINN already exists and is empty (no
+  README/.gitignore) — if GitHub auto-initialised it, the push will be rejected
+  as a non-fast-forward and I'll sort that out.
+
+  One note on the author email: I used shivammeena23@users.noreply.github.com.
+  If the commits don't show as attributed to your account on GitHub, your
+  account needs the ID-prefixed form instead — grab it from GitHub → Settings →
+  Emails and tell me, and I'll redo the rewrite in one command. Nothing's pushed
+  yet, so it stays cheap to change.
+
+  Once the push lands, npx -y vercel@latest --prod is the last step.
+
+✻ Cogitated for 1m 32s · done 3:55 PM
+
+※ recap: FINN is built and committed for the ENAM submission; the GitHub push is blocked because git is authenticated as Shuyanokoji7 but the repo is under shivammeena23. Next: clear the cached credential with the cmdkey commands, then push and deploy to Vercel. (disable recaps in /config)
+
+❯ PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> npx -y       
+  vercel@latest --prod                                                          
+  Vercel CLI 65.10.0                                                            
+  Error: No existing credentials found. Run vercel deploy --temporary to create 
+  a temporary deployment you can claim later, or vercel login to log in.        
+  Learn More: https://err.sh/vercel/no-credentials-found                        
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> vercel login 
+  vercel : The term 'vercel' is not recognized as the name of a cmdlet,         
+  function, script file, or operable program. Check the spelling of the name,   
+  or if a path                                                                  
+  was included, verify that the path is correct and try again.                  
+  At line:1 char:1                                                              
+  - vercel login                                                                
+  -                                                                             
+    + CategoryInfo          : ObjectNotFound: (vercel:String) [],               
+  CommandNotFoundException                                                      
+    + FullyQualifiedErrorId : CommandNotFoundException                          
+                                                                                
+  PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN>              
+
+● vercel isn't on your PATH — npx runs it transiently, so the login needs the
+  npx prefix too:
+
+  npx -y vercel@latest login
+  npx -y vercel@latest --prod
+
+  Let me check whether the GitHub push actually went through, since you moved on
+  to Vercel.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● GitHub is done — remote main is at 99b22de, matching your local HEAD exactly.
+  The credential fix worked.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Repo is live and in sync: https://github.com/shivammeena23/FINN
+
+  Now Vercel — the only missing piece. Run these two:
+
+  npx -y vercel@latest login
+  npx -y vercel@latest --prod
+
+  The login opens a browser. On the deploy, accept the defaults — it
+  auto-detects Next.js, and no environment variables are needed since the corpus
+  is committed. If it asks "Link to existing project?", say no and accept the
+  generated name.
+
+  Two alternatives if the CLI keeps fighting you:
+
+  - Import from GitHub instead — go to https://vercel.com/new, pick
+    shivammeena23/FINN, click Deploy. Zero config, and you get automatic
+    redeploys on every push. Honestly the better route now that the repo is up.
+  - npx -y vercel@latest deploy --temporary — no login at all, gives you a
+    claimable URL. Fine for a quick look, but I wouldn't send ENAM a temporary
+    link.
+
+  Once you have the URL, paste it here — I'll check the deployed build renders
+  correctly (the corpus should make it identical to local, but worth confirming
+  the static generation didn't drop anything).
+
+  Then SUBMISSION.md needs three links filled in: the Vercel URL,
+  https://github.com/shivammeena23/FINN, and your AI build history export
+  (/export in this session).
+
+✻ Cogitated for 28s · done 3:59 PM
+
+❯ PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN> npx -y       
+  vercel@latest --prod                                                          
+  Vercel CLI 65.10.0                                                            
+                                                                                
+    Directory       ~\OneDrive\Desktop\Mentee-Selection-Mailer\FINN             
+                                                                                
+    Team            bhavyas-projects-54118bcd                                   
+  ? Which project? Search all projects                                          
+  ? Which project?                                                              
+                                                                                
+                                                                                
+  ❯ virtual-cosmos                                                              
+                                                                                
+                                                                                
+   ──────────────                                                               
+                                                                                
+                                                                                
+    Back to project options                                                     
+                                                                                
+                                                                                
+  (Use arrow keys)                                                              
+
+● Don't pick virtual-cosmos — that's an existing unrelated project, and linking
+  to it would deploy FINN over the top of it.
+
+  Select "Back to project options" (arrow down to it, Enter), then choose the
+  option to create a new project rather than link to an existing one.
+
+  If it drops you back to the start, the prompts you want are:
+
+  ? Set up and deploy "~\...\FINN"?           → y
+  ? Which scope?                              → bhavyas-projects-54118bcd
+  ? Link to existing project?                 → N      ← this is the important
+  one
+  ? What's your project's name?               → finn
+  ? In which directory is your code located?  → ./
+  ? Want to modify these settings?            → N      (Next.js auto-detected)
+
+  The one that matters is Link to existing project? → N. Everything else can
+  take defaults.
+
+  Note the team is bhavyas-projects-54118bcd — that's a different identity again
+  from the shivammeena23 GitHub account we just pushed to. Not a problem for
+  the deploy itself, but worth knowing that the Vercel URL and the repo will sit
+  under different accounts when ENAM looks at them. Mention it in the covering
+  note or don't — either is fine, just don't be surprised by it.
+
+✻ Crunched for 12s · done 4:01 PM
+
+❯ ? Customize settings? no                                                      
+                                                                                
+  ✓ Created         bhavyas-projects-54118bcd/finn                              
+  > Connecting GitHub repository: https://github.com/shivammeena23/FINN         
+  Error: Failed to connect the GitHub repository shivammeena23/FINN.            
+  Error: You need admin or write access to the repository "FINN" to link it.    
+  (400)                                                                         
+    Inspect         https://vercel.com/bhavyas-projects-54118bcd/finn/CmuV2XsJo 
+  Cg5fGV8EPztMcGBZQcw                                                           
+    Production      https://finn-6jxsxu6nx-bhavyas-projects-54118bcd.vercel.app 
+  ▲ Aliased         https://finn-dusky-zeta.vercel.app                          
+                                                                                
+  ✓ Ready in 31s                                                                
+                                                                                
+  Next steps:                                                                   
+  - Check the production response:                                              
+    vercel curl https://finn-dusky-zeta.vercel.app                              
+  - View build logs:                                                            
+    vercel inspect finn-6jxsxu6nx-bhavyas-projects-54118bcd.vercel.app --logs   
+  - Create a new deployment from the same source:                               
+    vercel redeploy finn-6jxsxu6nx-bhavyas-projects-54118bcd.vercel.app         
+    PS C:\Users\yuta1\OneDrive\Desktop\Mentee-Selection-Mailer\FINN>            
+
+● Deployed: https://finn-dusky-zeta.vercel.app — let me verify it actually
+  renders.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All routes 200, but my text extraction came up empty — let me check properly
+  that real content is being served, not an empty shell.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● FINN is live and fully working in production.
+
+  - Live: https://finn-dusky-zeta.vercel.app
+  - Repo: https://github.com/shivammeena23/FINN
+
+  The Brief is serving real triaged filings (Info Edge's MD & CEO transition at
+  the top, scored 96, with its generated "why it matters" line), and the
+  Reliance ledger renders 6 Kept / 0 Partial / 6 Missed / 3 Open with the
+  battery and Kutch power slippage intact.
+
+  One thing to decide
+
+  The GitHub link failed: You need admin or write access to the repository 
+  "FINN" to link it. Your Vercel account (bhavyas-projects-54118bcd) is a
+  different identity from the shivammeena23 GitHub account.
+
+  This does not affect the deployment — it's live and complete. It only means
+  pushes to GitHub won't auto-redeploy. For a submission that's frozen anyway,
+  it's harmless. If you want to fix it, either connect the shivammeena23 GitHub
+  account under Vercel → Settings → Git, or just redeploy manually with npx -y 
+  vercel@latest --prod after any change.
+
+  Before you send
+
+  1. Open https://finn-dusky-zeta.vercel.app on an actual phone. This is the one
+     check I still can't do for you, and the brief says "mobile-first" four
+     times. Look at: the window pills on The Brief, the Signals sliders, and one
+     dossier row expanded to its quotes.
+  2. Fill the three links in SUBMISSION.md — Vercel URL, repo URL, and your AI
+     build history (/export in this session).
+  3. The covering note opens by acknowledging the Nov 1 deadline has passed —
+     worth re-reading that line before sending to assessment@enam.com with
+     subject ENAM - IIT screening - 2027.
+
+  One honest note for the email if you want it: the Vercel project sits under a
+  different account name than the GitHub repo. ENAM almost certainly won't care,
+  but if they ask, that's why.
+
+✻ Cooked for 50s · done 4:05 PM
+
+❯ everything works i CHECKED now i wan to make the submission                   
+
+● Let me lock the real links into the submission note first.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Two placeholders left. Here's what remains:
+
+  1. Export the AI build history — ENAM asks for it explicitly. Run this in the
+  session:
+
+  /export
+
+  That writes the full transcript to a file you can attach. (This conversation
+  is the build history — it includes the source probing, the classifier bug
+  fixes, the model-routing decisions, and the fabricated-quote catch, which is
+  exactly what they said they want to see.)
+
+  2. Your name for the sign-off.
+
+  Then there's how it actually gets sent.
+
+● User answered Claude's questions:
+  ⎿  · How should the email reach assessment@enam.com? → I'll send it myself 
+     (Recommended)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Pushed. Here's your submission, ready to send.
+
+  ---
+
+  To: assessment@enam.com
+  Subject: ENAM - IIT screening - 2027
+  Attach: the /export file
+
+  ---
+
+  Hi,
+
+  Thanks for the brief — here's FINN.
+
+  Live (mobile-first): https://finn-dusky-zeta.vercel.app
+  Repo: https://github.com/shivammeena23/FINN
+  AI build history: attached
+
+  Submitting after the Nov 1 deadline — apologies for that, and thank you for
+  still looking.
+
+  What I built
+
+  The brief's hard problem isn't aggregation, it's filtering. So FINN is built
+  around a claim most dashboards avoid making: most filings don't matter, and 
+  the app should say so out loud.
+
+  Three surfaces, all mobile-first:
+
+  - The Brief (push digest) — every filing across an 18-stock portfolio in a
+    window you choose, triaged into Act / Watch / Buried. Routine filings
+    collapse to a single line that tells you how much was hidden. Nothing is
+    deleted, and tapping any score shows exactly which rules fired — triage is
+    auditable, not a black box. Results filings render Revenue/EBITDA/PBT/PAT
+    with QoQ and YoY; management changes render who's arriving and where from.
+  - Signals (triggered alerts) — volume above N× its 20-day average, price
+    beyond ±X%, plus per-category rules. You move the sliders and the list
+    recomputes as you drag; the point is that you define "unusual", not me.
+  - Research (pull) — any NSE symbol, grounded strictly in annual reports and
+    concall transcripts.
+
+  The bit I'd point you at
+
+  Promised vs Delivered. FINN extracts every explicit forward-looking commitment
+  from management's past earnings calls, then adjudicates each against the most
+  recent call and the company's own reported figures. Reliance comes out 6 kept
+  / 6 missed — the battery and solar capacity timelines committed to in Jan and
+  Jul 2026 have all slipped to "late next year", in management's own words.
+  Deepak Nitrite is 3 kept / 7 missed.
+
+  Every row expands to two verbatim quotes — the promise and the evidence — each
+  linking to the source PDF. Where the documents don't settle a question the
+  verdict is OPEN; the prompt is explicit that abstaining beats guessing. KPIT's
+  entire ledger is OPEN, correctly, because its guidance is FY27/FY29 targets
+  that haven't matured.
+
+  And the quotes are checked, not trusted. npm run audit re-extracts every cited
+  PDF and asserts each quote appears in it — currently 143/143. That check
+  earned its keep immediately: the first run came back 143/148, catching five
+  Asian Paints "evidence" quotes that were investor-deck phrasings the model had
+  paraphrased into quote form. Right numbers, invented quotation marks. They're
+  now dropped automatically at build time, and a verdict that loses its quote
+  says so in the UI. That failure mode is exactly the slop you warned about, and
+  it's invisible unless you test for it.
+
+  Key decisions and trade-offs
+
+  Ingestion is decoupled from serving. NSE and screener.in throttle datacenter
+  IPs, so an app that scrapes on request is a demo that dies in the room. A
+  worker runs on a residential IP and writes a committed 954KB JSON corpus; the
+  deployed app only reads it. A fresh clone runs with no API key and no network.
+
+  No Python. Every source turned out to be plain HTTP (Yahoo's chart endpoint is
+  open JSON — no yfinance needed), and Gemini reads PDFs natively, which
+  deleted the whole pdfplumber/OCR layer. One TypeScript toolchain, one npm 
+  install.
+
+  NSE's own taxonomy does most of the classification for free. Its desc field is
+  a ~105-value vocabulary that maps cleanly onto your reference categories, so
+  rules handle it at zero tokens and the LLM only sees what survives triage.
+
+  Model routing, measured not asserted. Rules → flash-lite (bulk, batched
+  25/call) → flash-lite (PDF→numbers) → flash + 8k thinking (adjudication only).
+  Building the entire corpus — 438 filings enriched, 7 dossiers, 91 commitments
+  adjudicated — took 57 live calls and ~$0.09 notional, and $0.00 actual on the
+  free tier. A content-hash cache makes re-runs free. data/cost-report.json has
+  the numbers.
+
+  Two routing decisions worth flagging: Tier 3 was meant to be Pro, but every
+  Pro model 429s on the free tier, so it's Flash with a raised thinking budget
+  instead. And I demoted PDF extraction from flash to flash-lite on evidence —
+  on a benchmark filing flash-lite returned Reliance's PAT as ₹29,550cr,
+  matching the company's own press release, where flash returned ₹29,250cr and
+  left the QoQ/YoY columns empty. Cheaper and better, so it won.
+
+  What I deliberately left out
+
+  - Six of the eight pull views. Balance sheet, cash quality, trajectory,
+    guidance aren't built. Thin-but-working beats broad-but-broken, and
+    Promised-vs-Delivered is the one you said you value most, so it got the
+    time.
+  - Postgres. The corpus is committed JSON — zero provisioning, and the deploy
+    can't fail because a scrape failed. lib/store.ts is the single swap point.
+  - Live scraping from the deployed app. An unknown ticker degrades with an
+    honest message rather than attempting a fetch datacenter IPs usually lose.
+  - Annual reports as model input. Transcripts are ~500KB and carry the
+    guidance; annual reports are 10–30MB and wouldn't change a verdict. They're
+    linked, not parsed.
+  - Dossiers for all 23 companies. Seven are pre-built; free-tier quota
+    throttled the rest. The index marks which are ready instead of pretending.
+
+  Where I'd take it next
+
+  1. Compound the ledger across every call, not just the latest. Whether a
+     management team systematically slips timelines is a far stronger signal
+     than any single miss — and it's the thing you can't get from a broker note.
+  2. Let the investor argue with the triage weights. The scoring table is my
+     opinion; it should be theirs, and the app should learn from what they
+     actually open.
+  3. Nightly GitHub Action for ingestion, so the corpus refreshes without
+     anyone's laptop.
+
+  One thing the build surfaced that I'd flag regardless: ticker drift is real
+  and silent. Validating symbols against both NSE and Yahoo before committing
+  the portfolio caught that ZOMATO is now ETERNAL and that TATAMOTORS has split
+  into TMCV and TMPV — either would have produced a confidently empty dashboard.
+
+  Happy to walk through any of it.
+
+  Best,
+  [your name]
+
+  ---
+
+  Three things before you hit send:
+
+  1. Replace [your name] at the bottom.
+  2. Run /export and attach the file — that's the AI build history they asked
+     for, and it's currently the only unfilled item.
+  3. The Vercel project sits under bhavyas-projects-54118bcd while the repo is
+     under shivammeena23. Harmless, but if they ask, that's why.
+
+✻ Brewed for 1m 13s · done 4:08 PM
+
+❯ Shivam Meena 230969                                                           
+  Ran 1 shell command (ctrl+o to expand)
+
+● SUBMISSION.md is complete — no placeholders left — and pushed. It's open in
+  your IDE, so you can copy the covering note straight from there.
+
+  The sign-off now reads:
+
+  Best,
+  Shivam Meena
+  230969
+
+  One step left: run /export in this session and attach the file. That's the AI
+  build history ENAM asked for, and it's the only thing not yet in hand.
+
+  Then send to assessment@enam.com with subject ENAM - IIT screening - 2027.
+
+  Final state:
+
+  ┌─────────────────┬──────────────────────────────────────────────┐
+  │                 │                                              │
+  ├─────────────────┼──────────────────────────────────────────────┤
+  │ Live            │ https://finn-dusky-zeta.vercel.app           │
+  ├─────────────────┼──────────────────────────────────────────────┤
+  │ Repo            │ https://github.com/shivammeena23/FINN        │
+  ├─────────────────┼──────────────────────────────────────────────┤
+  │ Commits         │ 6, authored as shivammeena23                 │
+  ├─────────────────┼──────────────────────────────────────────────┤
+  │ Grounding audit │ 143/143 quotes verified                      │
+  ├─────────────────┼──────────────────────────────────────────────┤
+  │ Build cost      │ 57 live calls, ~$0.09 notional, $0.00 actual │
+  └─────────────────┴──────────────────────────────────────────────┘
+
+  Good luck with it.
+
+✻ Churned for 17s · done 4:08 PM

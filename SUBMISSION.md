@@ -3,7 +3,7 @@
 **To:** assessment@enam.com
 **Subject:** `ENAM - IIT screening - 2027`
 
-All links filled. Attach the /export transcript before sending.
+All links filled. The Claude Code transcript is committed at docs/ai-build-history.txt; attach a copy to the email as well.
 
 ---
 
@@ -15,7 +15,7 @@ Thanks for the brief — here's FINN.
 
 **Live (mobile-first):** https://finn-dusky-zeta.vercel.app
 **Repo:** https://github.com/shivammeena23/FINN
-**AI build history:** attached (Claude Code session export)
+**AI build history:** [docs/ai-build-history.txt](https://github.com/shivammeena23/FINN/blob/main/docs/ai-build-history.txt) in the repo (also attached)
 
 Submitting after the Nov 1 deadline — apologies for that, and thank you for still looking.
 
@@ -137,7 +137,7 @@ npx -y vercel@latest --prod
 Then open the Vercel URL **on an actual phone** and check: the Brief's window pills, the Signals
 sliders, and one dossier (`/research/RELIANCE`) expanded to its quotes.
 
-## Export the AI build history
+## AI build history
 
-In this Claude Code session, `/export` writes the full transcript to a file you can attach, or use
-the share link if you prefer a URL.
+The full Claude Code session is committed at `docs/ai-build-history.txt` (2,935 lines) and linked
+from the README. Attach the same file to the email so it is readable without opening the repo.

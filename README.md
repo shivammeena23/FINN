@@ -164,6 +164,14 @@ which the brief explicitly permits.)
 
 ---
 
+## How this was built
+
+The complete Claude Code session that produced this repo is committed at
+[](docs/ai-build-history.txt) - including the source probing, the
+classifier bugs found and fixed (postal-ballot results mis-tagged as earnings, demerger stubs
+producing a true-but-useless ), the evidence that demoted PDF extraction a model tier,
+and the audit run that caught five fabricated quotes.
+
 ## Running it
 
 ```bash

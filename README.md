@@ -167,10 +167,10 @@ which the brief explicitly permits.)
 ## How this was built
 
 The complete Claude Code session that produced this repo is committed at
-[](docs/ai-build-history.txt) - including the source probing, the
-classifier bugs found and fixed (postal-ballot results mis-tagged as earnings, demerger stubs
-producing a true-but-useless ), the evidence that demoted PDF extraction a model tier,
-and the audit run that caught five fabricated quotes.
+[`docs/ai-build-history.txt`](docs/ai-build-history.txt) — including the live source probing, the
+classifier bugs found and fixed (postal-ballot *results* mis-tagged as financial results; a
+post-demerger stub rendering a true-but-useless `+44,120%` YoY), the benchmark that demoted PDF
+extraction a model tier, and the audit run that caught five fabricated quotes.
 
 ## Running it
 

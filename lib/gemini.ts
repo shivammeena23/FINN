@@ -243,7 +243,9 @@ async function callOne(o: CallOpts): Promise<string | null> {
         outTokens: u.candidatesTokenCount ?? 0,
         thinkTokens: u.thoughtsTokenCount ?? 0,
       });
-      writeFileSync(path, JSON.stringify({ label: o.label, text }));
+      // Store usage alongside the response so the true build cost stays reconstructible
+      // from the cache even after the in-memory ledger is gone.
+      writeFileSync(path, JSON.stringify({ label: o.label, model: o.model, usage: u, text }));
       return text;
     } catch (e: unknown) {
       const msg = String((e as { message?: string })?.message ?? e);

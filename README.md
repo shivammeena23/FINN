@@ -37,7 +37,9 @@ render who is arriving and where from.
 drag. The point is that *you* define unusual.
 
 **Research** (pull) — enter any NSE symbol. Grounded in annual reports and concall transcripts only.
-The centrepiece is the **Promised vs Delivered** ledger.
+The centrepiece is the **Promised vs Delivered** ledger. Seven companies ship with a pre-built
+dossier (91 adjudicated commitments); the index marks which, and any other symbol degrades
+honestly rather than inventing one.
 
 ### Promised vs Delivered
 
@@ -75,7 +77,7 @@ worker/   (runs on a residential IP or GitHub Actions — never on Vercel)
   dossier.ts   Tier 2 + Tier 3, the promised-vs-delivered ledger
                               │
                      data/corpus/*.json  ──▶  Next.js on Vercel
-                       (committed, 824KB)       (reads the corpus; never scrapes)
+                       (committed, 954KB)       (reads the corpus; never scrapes)
 ```
 
 **Ingestion and serving are decoupled on purpose.** NSE and screener.in throttle datacenter
@@ -101,16 +103,24 @@ The brief rewards spending less for the same result, so routing is explicit and 
 | Tier | Model | Job | Volume |
 |---|---|---|---|
 | **0** | *none — rules* | NSE's 105-value taxonomy → the 17 reference categories, + triage scoring | **170 of 438 filings never reach a model** |
-| **1** | `flash-lite` | One-line "why it matters", batched 25/call | 268 filings in 11 calls |
-| **2** | `flash-lite` | Results PDF → Revenue/EBITDA/PBT/PAT; executive backgrounds | 13 filings |
-| **3** | `flash` + 8k thinking | Promised-vs-delivered adjudication, once per company | ~1 call/company |
+| **1** | `flash-lite` | One-line "why it matters", batched 25/call | 268 filings in **11 calls** |
+| **2** | `flash-lite` | Results PDF → Revenue/EBITDA/PBT/PAT; executive backgrounds | 13 results filings, 5 bios |
+| **3** | `flash` + 8k thinking | Promised-vs-delivered adjudication, once per company | 7 companies, 91 commitments |
 
 Plus a **content-hash cache** (`sha256` of model + prompt + input bytes) so re-runs cost nothing —
 re-running `enrich` after a prompt-unchanged edit is **$0.00**.
 
-Live measurements are written to [`data/cost-report.json`](data/cost-report.json) on every run.
-A full enrichment of 438 filings costs roughly **$0.03 notional** — and **$0.00 actual**, because
-it fits inside the free tier.
+Measured on the runs that built the committed corpus:
+
+| Pass | Live calls | Tokens in | Tokens out + thinking | Notional |
+|---|---|---|---|---|
+| Enrich (Tiers 1–2, 438 filings) | 27 | 198,466 | 33,090 | ~$0.033 |
+| Dossiers (Tier 3, 7 companies) | 30 | 388,640 | 51,884 | ~$0.060 |
+| **Total to build everything** | **57** | **587k** | **85k** | **~$0.09** |
+
+Actual spend: **$0.00** — it fits inside the free tier. Re-running after a prompt-unchanged edit
+is **$0.00 notional too**, because every call is a cache hit. Each run rewrites
+[`data/cost-report.json`](data/cost-report.json).
 
 **Three routing decisions worth naming:**
 

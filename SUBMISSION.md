@@ -3,7 +3,7 @@
 **To:** assessment@enam.com
 **Subject:** `ENAM - IIT screening - 2027`
 
-Vercel and GitHub links are filled in. One placeholder left: the AI build history export.
+All links filled. Attach the /export transcript before sending.
 
 ---
 
@@ -15,7 +15,7 @@ Thanks for the brief — here's FINN.
 
 **Live (mobile-first):** https://finn-dusky-zeta.vercel.app
 **Repo:** https://github.com/shivammeena23/FINN
-**AI build history:** [CLAUDE CODE SHARE LINK / EXPORT]
+**AI build history:** attached (Claude Code session export)
 
 Submitting after the Nov 1 deadline — apologies for that, and thank you for still looking.
 
@@ -114,7 +114,8 @@ confidently empty dashboard.
 Happy to walk through any of it.
 
 Best,
-[YOUR NAME]
+Shivam Meena
+230969
 
 ---
 
